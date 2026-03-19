@@ -1,0 +1,88 @@
+package proxy
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/agentgate/agentgate/config"
+	"github.com/agentgate/agentgate/hitl"
+)
+
+// sseModifier intercepts and rewrites outbound SSE data payloads to include the namespace.
+type sseModifier struct {
+	http.ResponseWriter
+	serverName string
+}
+
+func (m *sseModifier) Write(b []byte) (int, error) {
+	// Fast path: check if this looks like our SSE endpoint notification
+	// "data: /message?sessionId="
+	if bytes.Contains(b, []byte("data: /message?sessionId=")) {
+		newB := bytes.Replace(b, []byte("data: /message"), []byte(fmt.Sprintf("data: /%s/message", m.serverName)), 1)
+		return m.ResponseWriter.Write(newB)
+	}
+	return m.ResponseWriter.Write(b)
+}
+
+// SetupRouter creates the top-level HTTP mux.
+//
+// Route priority:
+//  1. /_agentgate/hitl/*  — internal HITL callbacks (no auth, no middleware)
+//  2. /{server-name}      — MCP server routes (Auth → HITL → Semantic → Upstream)
+func SetupRouter(ctx context.Context, cfg *config.Config) http.Handler {
+	mux := http.NewServeMux()
+
+	// ── Internal HITL callback routes ─────────────────────────────────────────
+	// These bypass all auth middleware — a human clicking a Slack/Discord button
+	// doesn't have the Bearer token.
+	mux.HandleFunc("/_agentgate/hitl/approve", hitl.GetCallbackHandler(true))
+	mux.HandleFunc("/_agentgate/hitl/deny", hitl.GetCallbackHandler(false))
+	mux.HandleFunc("/_agentgate/hitl/slack-interactive", hitl.SlackInteractiveHandler())
+	log.Println("[Router] Registered HITL callback routes")
+
+	// ── MCP server routes ─────────────────────────────────────────────────────
+	for name, srvConfig := range cfg.MCPServers {
+		var baseHandler http.Handler
+
+		if strings.HasPrefix(srvConfig.Upstream, "exec:") {
+			cmdString := strings.TrimSpace(strings.TrimPrefix(srvConfig.Upstream, "exec:"))
+			bridge, err := NewStdioBridge(ctx, name, cmdString)
+			if err != nil {
+				log.Fatalf("[Router] Failed to start StdioBridge for %s: %v", name, err)
+			}
+			baseHandler = bridge
+		} else {
+			targetURL, err := url.Parse(srvConfig.Upstream)
+			if err != nil {
+				log.Fatalf("[Router] Invalid upstream URL for %s: %v", name, err)
+			}
+			proxy := httputil.NewSingleHostReverseProxy(targetURL)
+			proxy.FlushInterval = time.Millisecond * 10
+			
+			// Wrap the proxy to inject our SSE namespace rewriter
+			srvName := name
+			baseHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				modWriter := &sseModifier{ResponseWriter: w, serverName: srvName}
+				proxy.ServeHTTP(modWriter, r)
+			})
+		}
+
+		// Middleware chain (innermost → outermost):
+		//   Upstream ← HITLMiddleware ← SemanticMiddleware
+		handler := SemanticMiddleware(cfg, name, srvConfig, HITLMiddleware(cfg, name, srvConfig, baseHandler))
+
+		path := "/" + name
+		mux.Handle(path, http.StripPrefix(path, handler))
+		mux.Handle(path+"/", http.StripPrefix(path, handler))
+		log.Printf("[Router] Registered %q → %s (HITL: %v)", name, srvConfig.Upstream, len(srvConfig.Policies.HumanApproval.RequireForTools) > 0)
+	}
+
+	return mux
+}

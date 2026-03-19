@@ -1,0 +1,19 @@
+# Binaries
+agentgate
+agentgate.exe
+
+# Runtime Logs
+audit.log
+*.log
+
+# IPC Networking
+*.sock
+*.ipc_token
+
+# Go Build Data
+vendor/
+*.out
+
+# User Specific configuration
+agentgate.yaml
+.env
