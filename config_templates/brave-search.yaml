@@ -1,0 +1,28 @@
+# Template: Brave Search Server
+# Gives an AI agent web search capabilities with aggressive rate limiting
+# to prevent it from making thousands of API calls (and burning your Brave API quota).
+# Install: npx -y @modelcontextprotocol/server-brave-search
+
+version: "1.0"
+network:
+  port: 8083
+  public_url: "http://localhost:8083"
+auth:
+  require_bearer_token: "<YOUR_SECRET_TOKEN>"
+audit_log_path: "audit.log"
+
+mcp_servers:
+  brave_search:
+    upstream: "exec:npx -y @modelcontextprotocol/server-brave-search"
+    # Requires BRAVE_API_KEY environment variable
+
+    policies:
+      access_mode: "allowlist"
+      allowed_tools:
+        - "brave_web_search"
+        - "brave_local_search"
+
+      # Rate limit aggressively — Brave API free tier is 2000 requests/month
+      rate_limit:
+        max_requests: 5
+        window_seconds: 60

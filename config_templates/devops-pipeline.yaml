@@ -1,0 +1,101 @@
+# Complex Template: DevOps / CI-CD Pipeline Agent
+#
+# Use Case: An autonomous AI agent that can:
+#   - Read your codebase and git history
+#   - Search the web for documentation
+#   - Create GitHub issues and PRs (with human approval)
+#   - Query deployment logs from your filesystem
+#
+# This template combines 4 MCP servers with layered security policies.
+# Each server has independent rate limits and RBAC rules.
+
+version: "1.0"
+network:
+  port: 8083
+  public_url: "<YOUR_PUBLIC_URL>"   # e.g. ngrok/cloudflare tunnel for Slack HITL callbacks
+auth:
+  require_bearer_token: "<YOUR_SECRET_TOKEN>"
+audit_log_path: "audit.log"
+agent_limits:
+  max_requests_per_minute: 200     # Global ceiling across all servers
+
+mcp_servers:
+
+  # ── 1. Local Codebase Access (Read-Only) ─────────────────────────────────────
+  codebase:
+    upstream: "exec:npx -y @modelcontextprotocol/server-filesystem <YOUR_PROJECT_ROOT>"
+    policies:
+      access_mode: "allowlist"
+      allowed_tools:
+        - "read_file"
+        - "read_multiple_files"
+        - "list_directory"
+        - "directory_tree"
+        - "search_files"
+      parameter_rules:
+        read_file:
+          argument: "path"
+          not_match_regex: "(\\.env|\\.pem|\\.key|\\.ssh/|secrets/|credentials)"
+          error_msg: "Security Block: Reading credential/secret files is not allowed."
+      rate_limit:
+        max_requests: 100
+        window_seconds: 60
+
+  # ── 2. Git Repository Introspection ──────────────────────────────────────────
+  git_history:
+    upstream: "exec:npx -y @modelcontextprotocol/server-git --repository <YOUR_PROJECT_ROOT>"
+    policies:
+      access_mode: "allowlist"
+      allowed_tools:
+        - "git_log"
+        - "git_diff"
+        - "git_status"
+        - "git_show"
+        - "git_blame"
+      rate_limit:
+        max_requests: 40
+        window_seconds: 60
+
+  # ── 3. GitHub API — PRs and Issues (Write requires HITL) ─────────────────────
+  github:
+    upstream: "exec:npx -y @modelcontextprotocol/server-github"
+    # Set GITHUB_PERSONAL_ACCESS_TOKEN in your environment
+    policies:
+      access_mode: "allowlist"
+      allowed_tools:
+        - "get_file_contents"
+        - "list_issues"
+        - "get_issue"
+        - "list_pull_requests"
+        - "search_code"
+        - "create_issue"
+        - "add_issue_comment"
+        - "create_pull_request"
+      human_approval:
+        require_for_tools:
+          - "create_pull_request"
+          - "create_issue"
+        timeout_seconds: 300
+        webhook:
+          type: "slack"
+          url: "<YOUR_SLACK_WEBHOOK_URL>"
+      parameter_rules:
+        create_pull_request:
+          argument: "base"
+          not_match_regex: "^(main|master|production|prod)$"
+          error_msg: "Security Block: Direct PRs to protected branches are not allowed. Target a feature branch."
+      rate_limit:
+        max_requests: 20
+        window_seconds: 60
+
+  # ── 4. Web Search for Documentation ──────────────────────────────────────────
+  docs_search:
+    upstream: "exec:npx -y @modelcontextprotocol/server-brave-search"
+    # Set BRAVE_API_KEY in your environment
+    policies:
+      access_mode: "allowlist"
+      allowed_tools:
+        - "brave_web_search"
+      rate_limit:
+        max_requests: 10
+        window_seconds: 60

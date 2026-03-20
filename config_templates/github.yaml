@@ -1,0 +1,55 @@
+# Template: GitHub Server
+# Gives an AI agent access to the GitHub API.
+# Blocks all write operations (push, delete, merge) and requires HITL for PR creation.
+# Install: npx -y @modelcontextprotocol/server-github
+
+version: "1.0"
+network:
+  port: 8083
+  public_url: "<YOUR_PUBLIC_URL>"
+auth:
+  require_bearer_token: "<YOUR_SECRET_TOKEN>"
+audit_log_path: "audit.log"
+
+mcp_servers:
+  github:
+    upstream: "exec:npx -y @modelcontextprotocol/server-github"
+    # Requires GITHUB_PERSONAL_ACCESS_TOKEN env variable set when running AgentGate
+
+    policies:
+      access_mode: "allowlist"
+      allowed_tools:
+        # Safe read-only tools
+        - "get_file_contents"
+        - "list_issues"
+        - "get_issue"
+        - "search_repositories"
+        - "search_code"
+        - "list_branches"
+        - "get_commit"
+        - "list_pull_requests"
+        - "get_pull_request"
+        # Write tools — only allowed with HITL approval:
+        - "create_issue"
+        - "create_pull_request"
+        - "add_issue_comment"
+
+      human_approval:
+        require_for_tools:
+          - "create_pull_request"
+          - "create_issue"
+        timeout_seconds: 300
+        webhook:
+          type: "slack"
+          url: "<YOUR_SLACK_WEBHOOK_URL>"
+
+      parameter_rules:
+        # Prevent the agent from touching main/master branches directly
+        create_pull_request:
+          argument: "base"
+          not_match_regex: "^(main|master|production|prod|release)$"
+          error_msg: "Security Block: PRs targeting protected branches require manual pipeline approval."
+
+      rate_limit:
+        max_requests: 30
+        window_seconds: 60

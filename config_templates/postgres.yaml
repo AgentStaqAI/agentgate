@@ -1,0 +1,43 @@
+# Template: PostgreSQL Server
+# Connects an AI agent to a Postgres database.
+# Requires Slack-based HITL approval before any query execution.
+# Install: npx -y @modelcontextprotocol/server-postgres
+
+version: "1.0"
+network:
+  port: 8083
+  public_url: "<YOUR_PUBLIC_URL>"  # Required for Slack callback button links
+auth:
+  require_bearer_token: "<YOUR_SECRET_TOKEN>"
+audit_log_path: "audit.log"
+
+mcp_servers:
+  postgres_db:
+    upstream: "exec:npx -y @modelcontextprotocol/server-postgres <YOUR_POSTGRES_CONNECTION_STRING>"
+    # Example connection string: postgresql://user:password@localhost:5432/mydb
+
+    policies:
+      access_mode: "allowlist"
+      allowed_tools:
+        - "query"
+        - "list_tables"
+        - "describe_table"
+
+      parameter_rules:
+        # Block all mutating SQL — only SELECT allowed without approval
+        query:
+          argument: "sql"
+          not_match_regex: "(?i)\\b(DROP|DELETE|TRUNCATE|ALTER|UPDATE|INSERT|CREATE|GRANT|REVOKE)\\b"
+          error_msg: "Security Block: Mutating SQL requires going through Human Approval workflow."
+
+      human_approval:
+        require_for_tools:
+          - "query"
+        timeout_seconds: 300
+        webhook:
+          type: "slack"
+          url: "<YOUR_SLACK_WEBHOOK_URL>"
+
+      rate_limit:
+        max_requests: 20
+        window_seconds: 60

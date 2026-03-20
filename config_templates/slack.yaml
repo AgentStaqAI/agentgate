@@ -1,0 +1,42 @@
+# Template: Slack Server
+# Lets an AI agent read channels and post messages — but requires human approval
+# before sending any message to prevent the agent from posting inappropriate content.
+# Install: npx -y @modelcontextprotocol/server-slack
+
+version: "1.0"
+network:
+  port: 8083
+  public_url: "<YOUR_PUBLIC_URL>"
+auth:
+  require_bearer_token: "<YOUR_SECRET_TOKEN>"
+audit_log_path: "audit.log"
+
+mcp_servers:
+  slack:
+    upstream: "exec:npx -y @modelcontextprotocol/server-slack"
+    # Requires SLACK_BOT_TOKEN and SLACK_TEAM_ID environment variables
+
+    policies:
+      access_mode: "allowlist"
+      allowed_tools:
+        # Safe read-only tools
+        - "slack_list_channels"
+        - "slack_get_channel_history"
+        - "slack_get_thread_replies"
+        - "slack_search_messages"
+        - "slack_get_users"
+        # Write action — must be reviewed by a human first
+        - "slack_post_message"
+
+      human_approval:
+        require_for_tools:
+          - "slack_post_message"
+        timeout_seconds: 120
+        webhook:
+          type: "slack"
+          url: "<YOUR_APPROVALS_SLACK_WEBHOOK_URL>"
+          # Tip: Use a different Slack channel for approvals than the one the agent posts to!
+
+      rate_limit:
+        max_requests: 10
+        window_seconds: 60

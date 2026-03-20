@@ -2,7 +2,6 @@ package proxy
 
 import (
 "bufio"
-"bytes"
 "context"
 "crypto/rand"
 "encoding/hex"
@@ -203,7 +202,6 @@ return bridge, nil
 // ServeHTTP writes the HTTP JSON request payload to the child process Stdin,
 // and answers the HTTP request with the exact newline-delimited JSON response from Stdout.
 func (s *StdioBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-log.Printf("[StdioBridge] ServeHTTP called: method=%s url=%s", r.Method, r.URL.String())
 
 // Check if process has already crashed using the atomic flag (race-free)
 if s.exited.Load() {
@@ -382,12 +380,10 @@ return
 defer r.Body.Close()
 
 if len(body) == 0 {
-log.Printf("[StdioBridge] Received empty body — rejecting")
 http.Error(w, "Empty body", http.StatusBadRequest)
 return
 }
 
-log.Printf("[StdioBridge] Incoming sync payload (%d bytes)", len(body))
 
 var env rpcEnvelope
 if err := json.Unmarshal(body, &env); err != nil {
@@ -431,11 +427,9 @@ w.WriteHeader(http.StatusOK)
 return
 }
 
-log.Printf("[StdioBridge] Payload written to stdin. Waiting for stdout response (timeout: %s)...", stdioReadTimeout)
 
 select {
 case res := <-ch:
-log.Printf("[StdioBridge] Got response (%d bytes): %s", len(res), bytes.TrimSpace(res))
 w.Header().Set("Content-Type", "application/json")
 w.WriteHeader(http.StatusOK)
 w.Write(res)

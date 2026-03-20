@@ -1,0 +1,49 @@
+# Template: Git Server
+# Gives an AI agent read access to git repositories.
+# Block all destructive git write operations outright.
+# Install: npx -y @modelcontextprotocol/server-git
+
+version: "1.0"
+network:
+  port: 8083
+  public_url: "http://localhost:8083"
+auth:
+  require_bearer_token: "8fa07a566c28730c8fcccc44eb686911"
+audit_log_path: "/Users/omkardeshmukh/development/agentgate/audit.log"
+agent_limits:
+  max_requests_per_minute: 60
+
+mcp_servers:
+  git:
+    # ── Option A (Recommended): uvx — no venv needed, isolated env auto-managed
+    upstream: "exec:/opt/homebrew/bin/uvx mcp-server-git --repository /Users/omkardeshmukh/development/agentgate"
+
+    # ── Option B: python3 with a global pip install
+    #    First run: pip install mcp-server-git
+    # upstream: "exec:python3 -m mcp_server_git --repository <YOUR_REPO_PATH>"
+
+    # ── Option C: python3 inside a venv (most portable for prod)
+    #    First run: python3 -m venv .venv && .venv/bin/pip install mcp-server-git
+    #    Point directly to the venv's Python — AgentGate cannot activate a venv for you.
+    # upstream: "exec:/your/project/.venv/bin/python -m mcp_server_git --repository <YOUR_REPO_PATH>"
+
+
+    policies:
+      access_mode: "allowlist"
+      # Whitelist only read-safe git introspection tools
+      allowed_tools:
+        - "git_status"
+        - "git_diff"
+        - "git_diff_staged"
+        - "git_diff_unstaged"
+        - "git_log"
+        - "git_show"
+        - "git_blame"
+
+      # Explicitly block any state-mutating tools:
+      #   git_commit, git_add, git_checkout, git_create_branch, git_reset are NOT listed above
+      #   so they are automatically blocked in "allowlist" mode.
+
+      rate_limit:
+        max_requests: 30
+        window_seconds: 60

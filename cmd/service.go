@@ -36,6 +36,11 @@ var serviceCmd = &cobra.Command{
 			DisplayName: "AgentGate Semantic Firewall",
 			Description: "AgentGate MCP firewall and reverse proxy.",
 			Arguments:   []string{"serve", "--config", absPath},
+			// UserService installs to ~/Library/LaunchAgents/ on macOS (no sudo needed).
+			// On Linux it targets ~/.config/systemd/user/. On Windows it uses the current user scope.
+			Option: service.KeyValue{
+				"UserService": true,
+			},
 		}
 
 		prg := &emptyProgram{}

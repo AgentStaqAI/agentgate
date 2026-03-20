@@ -1,0 +1,117 @@
+# Complex Template: Data Analyst Agent
+#
+# Use Case: A data analyst AI agent that can:
+#   - Query a production Postgres database (SELECT only, no mutations)
+#   - Query a local SQLite analytics cache freely
+#   - Fetch external data sources from the web
+#   - Requires Slack HITL approval before running ANY Postgres query
+#     to prevent accidental data leakage or expensive full-table scans
+#   - Post analysis summaries to a Slack channel (with approval)
+#   - Remembers context across sessions via the memory server
+
+version: "1.0"
+network:
+  port: 8083
+  public_url: "<YOUR_PUBLIC_URL>"   # Required for Slack HITL callback buttons
+auth:
+  require_bearer_token: "<YOUR_SECRET_TOKEN>"
+audit_log_path: "audit.log"
+agent_limits:
+  max_requests_per_minute: 100
+
+mcp_servers:
+
+  # ── 1. Production Postgres (Fully Gated — HITL on every query) ───────────────
+  production_db:
+    upstream: "exec:npx -y @modelcontextprotocol/server-postgres <YOUR_POSTGRES_CONNECTION_STRING>"
+    policies:
+      access_mode: "allowlist"
+      allowed_tools:
+        - "query"
+        - "list_tables"
+        - "describe_table"
+      parameter_rules:
+        # Even with HITL, block mutations at the firewall level as defense-in-depth
+        query:
+          argument: "sql"
+          not_match_regex: "(?i)\\b(DROP|DELETE|TRUNCATE|ALTER|UPDATE|INSERT|CREATE|GRANT|REVOKE)\\b"
+          error_msg: "Security Block: This agent has read-only access to the production database."
+      human_approval:
+        require_for_tools:
+          - "query"               # Every single Postgres query must be approved by a human
+        timeout_seconds: 300
+        webhook:
+          type: "slack"
+          url: "<YOUR_SLACK_WEBHOOK_URL>"
+      rate_limit:
+        max_requests: 5           # Very conservative — each query costs money/performance
+        window_seconds: 60
+
+  # ── 2. Local SQLite Analytics Cache (Free to Read) ───────────────────────────
+  analytics_cache:
+    upstream: "exec:npx -y @modelcontextprotocol/server-sqlite <YOUR_ANALYTICS_CACHE_DB>"
+    policies:
+      access_mode: "allowlist"
+      allowed_tools:
+        - "read_query"
+        - "list_tables"
+        - "describe_table"
+      parameter_rules:
+        read_query:
+          argument: "query"
+          not_match_regex: "(?i)\\b(DROP|DELETE|TRUNCATE|ALTER|UPDATE|INSERT)\\b"
+          error_msg: "Security Block: Only SELECT queries are permitted on the analytics cache."
+      rate_limit:
+        max_requests: 50
+        window_seconds: 60
+
+  # ── 3. Web Fetch for External Data Sources ───────────────────────────────────
+  external_data:
+    upstream: "exec:npx -y @modelcontextprotocol/server-fetch"
+    policies:
+      access_mode: "allowlist"
+      allowed_tools:
+        - "fetch"
+      parameter_rules:
+        fetch:
+          argument: "url"
+          not_match_regex: "(localhost|127\\.0\\.0\\.1|192\\.168\\.|10\\.|file://)"
+          error_msg: "Security Block: Fetching internal network addresses is not allowed."
+      rate_limit:
+        max_requests: 15
+        window_seconds: 60
+
+  # ── 4. Slack Reporting (Post summaries, requires approval) ───────────────────
+  slack_reporting:
+    upstream: "exec:npx -y @modelcontextprotocol/server-slack"
+    # Set SLACK_BOT_TOKEN and SLACK_TEAM_ID in your environment
+    policies:
+      access_mode: "allowlist"
+      allowed_tools:
+        - "slack_post_message"
+        - "slack_list_channels"
+      human_approval:
+        require_for_tools:
+          - "slack_post_message"
+        timeout_seconds: 120
+        webhook:
+          type: "slack"
+          url: "<YOUR_APPROVALS_SLACK_WEBHOOK_URL>"
+      rate_limit:
+        max_requests: 5
+        window_seconds: 60
+
+  # ── 5. Agent Memory — Persist Findings Across Sessions ───────────────────────
+  memory:
+    upstream: "exec:npx -y @modelcontextprotocol/server-memory"
+    policies:
+      access_mode: "allowlist"
+      allowed_tools:
+        - "create_entities"
+        - "add_observations"
+        - "read_graph"
+        - "search_nodes"
+        - "open_nodes"
+      rate_limit:
+        max_requests: 30
+        window_seconds: 60

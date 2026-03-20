@@ -42,6 +42,13 @@ type SecurityPolicy struct {
 	BlockedTools   []string                 `yaml:"blocked_tools"`
 	ParameterRules map[string]ParameterRule `yaml:"parameter_rules"`
 	HumanApproval  HumanApproval            `yaml:"human_approval"`
+	RateLimit      RateLimitConfig          `yaml:"rate_limit"`
+}
+
+// RateLimitConfig defines granular infinite loop protection timelines.
+type RateLimitConfig struct {
+	MaxRequests   int `yaml:"max_requests"`
+	WindowSeconds int `yaml:"window_seconds"`
 }
 
 // HumanApproval defines which tools require human sign-off before execution.

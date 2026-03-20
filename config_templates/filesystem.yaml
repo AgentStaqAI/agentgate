@@ -1,0 +1,57 @@
+# Template: Filesystem Server
+# Exposes a local directory to an AI agent with strict path sandboxing.
+# Install the server: npx -y @modelcontextprotocol/server-filesystem
+
+version: "1.0"
+network:
+  port: 8083
+  public_url: "http://localhost:8083"
+auth:
+  require_bearer_token: "<YOUR_SECRET_TOKEN>"
+audit_log_path: "audit.log"
+agent_limits:
+  max_requests_per_minute: 120
+
+mcp_servers:
+  filesystem:
+    upstream: "exec:npx -y @modelcontextprotocol/server-filesystem <YOUR_ALLOWED_DIRECTORY>"
+
+    policies:
+      access_mode: "allowlist"
+      allowed_tools:
+        - "read_file"
+        - "read_multiple_files"
+        - "list_directory"
+        - "directory_tree"
+        - "search_files"
+        # Uncomment the lines below to allow write operations (requires HITL approval below)
+        # - "write_file"
+        # - "create_directory"
+        # - "move_file"
+        # - "delete_file"
+
+      parameter_rules:
+        # Block any path attempting to escape the allowed directory via traversal
+        read_file:
+          argument: "path"
+          not_match_regex: "\\.\\."
+          error_msg: "Security Block: Directory traversal (../) is not allowed."
+
+        # Only allow searching text files, not binaries or configs
+        search_files:
+          argument: "pattern"
+          not_match_regex: "(\\.env|\\.pem|\\.key|\\.ssh/)"
+          error_msg: "Security Block: Searching sensitive file types is not allowed."
+
+      # Uncomment to require human approval before any write operations
+      # human_approval:
+      #   require_for_tools:
+      #     - "write_file"
+      #     - "delete_file"
+      #   timeout_seconds: 120
+      #   webhook:
+      #     type: "terminal"
+
+      rate_limit:
+        max_requests: 60
+        window_seconds: 60

@@ -1,0 +1,46 @@
+# Template: SQLite Server
+# Connects an AI agent to a local SQLite database.
+# Enforces read-only queries via regex sandbox; requires human approval for any writes.
+# Install: npx -y @modelcontextprotocol/server-sqlite
+
+version: "1.0"
+network:
+  port: 8083
+  public_url: "http://localhost:8083"
+auth:
+  require_bearer_token: "<YOUR_SECRET_TOKEN>"
+audit_log_path: "audit.log"
+
+mcp_servers:
+  sqlite_db:
+    upstream: "exec:npx -y @modelcontextprotocol/server-sqlite <YOUR_DATABASE_PATH>.db"
+
+    policies:
+      access_mode: "allowlist"
+      allowed_tools:
+        - "read_query"
+        - "list_tables"
+        - "describe_table"
+        # "write_query" and "create_table" are intentionally omitted for read-only mode
+        # Uncomment the lines below and the human_approval block to allow guarded writes:
+        # - "write_query"
+
+      parameter_rules:
+        # Block all mutating SQL statements on the read_query tool as a defense-in-depth measure
+        read_query:
+          argument: "query"
+          not_match_regex: "(?i)\\b(DROP|DELETE|TRUNCATE|ALTER|UPDATE|INSERT|CREATE|REPLACE)\\b"
+          error_msg: "Security Block: Only SELECT statements are permitted."
+
+      # Uncomment for write access with human approval
+      # human_approval:
+      #   require_for_tools:
+      #     - "write_query"
+      #   timeout_seconds: 120
+      #   webhook:
+      #     type: "slack"
+      #     url: "<YOUR_SLACK_WEBHOOK_URL>"
+
+      rate_limit:
+        max_requests: 30
+        window_seconds: 60

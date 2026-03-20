@@ -1,0 +1,32 @@
+# Template: Fetch Server
+# Allows the agent to fetch and read web pages.
+# Rate-limited to prevent abuse and block access to private/local network addresses.
+# Install: npx -y @modelcontextprotocol/server-fetch
+
+version: "1.0"
+network:
+  port: 8083
+  public_url: "http://localhost:8083"
+auth:
+  require_bearer_token: "<YOUR_SECRET_TOKEN>"
+audit_log_path: "audit.log"
+
+mcp_servers:
+  web_fetch:
+    upstream: "exec:npx -y @modelcontextprotocol/server-fetch"
+
+    policies:
+      access_mode: "allowlist"
+      allowed_tools:
+        - "fetch"
+
+      parameter_rules:
+        # Block access to localhost, internal IPs, and file:// protocol (SSRF protection)
+        fetch:
+          argument: "url"
+          not_match_regex: "(localhost|127\\.0\\.0\\.1|192\\.168\\.|10\\.|file://|169\\.254\\.)"
+          error_msg: "Security Block: Fetching local/internal network addresses is not allowed (SSRF protection)."
+
+      rate_limit:
+        max_requests: 20
+        window_seconds: 60
