@@ -39,11 +39,11 @@ changelog:
 
 brews:
   - repository:
-      owner: om252345
+      owner: AgentStaqAI
       name: homebrew-agentgate
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
-    homepage: "https://github.com/om252345/agentgate"
+    homepage: "https://github.com/AgentStaqAI/agentgate"
     description: "AgentGate Semantic Firewall and MCP Protocol Proxy"
     install: |-
       bin.install "agentgate"
