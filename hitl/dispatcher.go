@@ -1,18 +1,13 @@
 package hitl
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"strings"
-	"syscall"
 
 	"github.com/agentgate/agentgate/config"
-	"github.com/kardianos/service"
 )
 
 // Dispatch fires the appropriate notification for the given webhook type and
@@ -42,67 +37,7 @@ func Dispatch(
 	}
 }
 
-// ── Terminal ──────────────────────────────────────────────────────────────────
 
-func dispatchTerminal(serverName, toolName string, args map[string]any, decisionChan chan HitlDecision) {
-	if !service.Interactive() {
-		log.Printf("[HITL Terminal] ❌ Action requires terminal approval, but AgentGate is running as a background service. Denying by default.")
-		decisionChan <- HitlDecision{Approved: false, Approver: "System (Headless)"}
-		return
-	}
-
-	argsJSON, _ := json.MarshalIndent(args, "    ", "  ")
-
-	// Open /dev/tty directly — always the controlling terminal of the process,
-	// regardless of how stdin (fd 0) is redirected.
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err != nil {
-		log.Printf("[HITL Terminal] Cannot open /dev/tty: %v — denying by default", err)
-		decisionChan <- HitlDecision{Approved: false, Approver: "System (No TTY)"}
-		return
-	}
-	defer tty.Close()
-
-	// ── Drain any stale input from the tty buffer ─────────────────────────────
-	// When the agent sends an HTTP request via curl/SDK and hits Enter, that \n
-	// keypresses sits in the terminal input buffer. Without draining, ReadString
-	// consumes it immediately and "denies" before the user even sees the prompt.
-	// Fix: briefly set O_NONBLOCK, read until EAGAIN, then restore blocking mode.
-	fd := int(tty.Fd())
-	if err := syscall.SetNonblock(fd, true); err == nil {
-		drain := make([]byte, 256)
-		for {
-			_, rerr := tty.Read(drain)
-			if rerr != nil {
-				break // EAGAIN / EWOULDBLOCK — buffer empty, done draining
-			}
-		}
-		syscall.SetNonblock(fd, false) //nolint:errcheck — restoring blocking; ignore error
-	}
-	// ─────────────────────────────────────────────────────────────────────────
-
-	fmt.Fprintf(tty, "\n\033[33m╔══════════════════════════════════════════════════╗\033[0m\n")
-	fmt.Fprintf(tty, "\033[33m║  ⚠️  AgentGate: Human Approval Required          ║\033[0m\n")
-	fmt.Fprintf(tty, "\033[33m╚══════════════════════════════════════════════════╝\033[0m\n")
-	fmt.Fprintf(tty, "  Server:    \033[1m%s\033[0m\n", serverName)
-	fmt.Fprintf(tty, "  Tool:      \033[1m%s\033[0m\n", toolName)
-	fmt.Fprintf(tty, "  Arguments:\n    %s\n\n", string(argsJSON))
-	fmt.Fprintf(tty, "Allow execution? [\033[32my\033[0m/\033[31mN\033[0m]: ")
-
-	reader := bufio.NewReader(tty)
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		log.Printf("[HITL Terminal] Failed to read from /dev/tty: %v — denying by default", err)
-		decisionChan <- HitlDecision{Approved: false, Approver: "System (Read Error)"}
-		return
-	}
-
-	input := strings.TrimSpace(strings.ToLower(line))
-	approved := input == "y" || input == "yes"
-	decisionChan <- HitlDecision{Approved: approved, Approver: "Terminal Controller"}
-}
-
-// ── Slack ─────────────────────────────────────────────────────────────────────
 
 func dispatchSlack(webhookURL, serverName, toolName string, args map[string]any, reqID, token string) {
 	argsJSON, _ := json.MarshalIndent(args, "", "  ")
