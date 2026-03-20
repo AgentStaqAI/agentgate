@@ -4,9 +4,9 @@
 
 **The Zero-Trust Firewall and Protocol Bridge for the Model Context Protocol (MCP)**
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/AgentStack-AI/agentgate)](https://goreportcard.com/report/github.com/AgentStack-AI/agentgate)
+[![Go Report Card](https://goreportcard.com/badge/github.com/AgentStaqAI/agentgate)](https://goreportcard.com/report/github.com/AgentStaqAI/agentgate)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/AgentStack-AI/agentgate?style=social)](https://github.com/AgentStack-AI/agentgate/stargazers)
+[![Stars](https://img.shields.io/github/stars/AgentStaqAI/agentgate?style=social)](https://github.com/AgentStaqAI/agentgate/stargazers)
 
 > A sub-millisecond, zero-dependency reverse proxy written in Go that airgaps your AI agents. It intercepts MCP commands, translates them to HTTP/SSE, and wraps them in an impenetrable semantic firewall.
 
@@ -36,7 +36,7 @@ Relying on "system prompts" for security is a guaranteed way to get your databas
 ```
 
 ```
-[ LLM / LangChain ] ──► (HTTP/SSE) ──► [ 🛡️ AgentGate ] ──► (stdio) ──► [ MCP Tools / DB ]
+[ LLM / LangChain ] ──► (HTTP/SSE) ──► [ AgentGate ] ──► (stdio) ──► [ MCP Tools / DB ]
                                                 │
                                        ┌────────┴────────┐
                                        │  Policy Engine  │
@@ -72,16 +72,63 @@ AgentGate is a single, zero-dependency Go binary.
 
 **Option 1 — Homebrew (macOS/Linux)**
 ```bash
-brew tap AgentStack-AI/agentgate
+brew tap AgentStaqAI/agentgate
 brew install agentgate
 ```
 
 **Option 2 — Build from Source**
 ```bash
-git clone https://github.com/AgentStack-AI/agentgate.git
+git clone https://github.com/AgentStaqAI/agentgate.git
 cd agentgate
 go build -o agentgate .
 ```
+
+---
+
+## 5-Minute Example
+
+Define your MCP servers in `agentgate.yaml`:
+
+```yaml
+version: "1.0"
+network:
+  port: 8083
+auth:
+  require_bearer_token: "my-secret-token"
+audit_log_path: "audit.log"
+
+mcp_servers:
+  filesystem:
+    upstream: "exec:npx -y @modelcontextprotocol/server-filesystem /home/user/projects"
+    policies:
+      access_mode: "allowlist"
+      allowed_tools: ["read_file", "list_directory"]
+      rate_limit:
+        max_requests: 60
+        window_seconds: 60
+
+  my_postgres:
+    upstream: "http://localhost:9090"   # An already-running MCP HTTP server
+    policies:
+      allowed_tools: ["query"]
+      human_approval:
+        require_for_tools: ["query"]
+        webhook:
+          type: "slack"
+          url: "https://hooks.slack.com/services/..."
+```
+
+Start AgentGate, then point your LLM client at it using the protocol your MCP server speaks:
+
+| Protocol | Your MCP server speaks | URL to give your LLM client |
+|---|---|---|
+| **Streamable HTTP** (MCP spec 2025) | Native MCP / Go & TS SDKs | `http://localhost:8083/filesystem/mcp` |
+| **Server-Sent Events** (SSE legacy) | Python SDK, FastMCP | `http://localhost:8083/filesystem/sse` |
+| **Synchronous JSON-RPC** (plain HTTP) | Custom HTTP servers, curl | `http://localhost:8083/filesystem/` |
+
+All three paths go through the **same firewall** — auth, RBAC, regex sandbox, rate limiting, and HITL checks apply equally regardless of the transport protocol.
+
+> See the **[API & Endpoints guide](api_docs.md)** for a detailed breakdown of how each protocol works.
 
 ---
 
