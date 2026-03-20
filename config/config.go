@@ -10,9 +10,9 @@ import (
 
 // Config represents the root configuration structure
 type Config struct {
-	Version     string               `yaml:"version"`
-	Network     NetworkConfig        `yaml:"network"`
-	Auth        AuthConfig           `yaml:"auth"`
+	Version      string               `yaml:"version"`
+	Network      NetworkConfig        `yaml:"network"`
+	Auth         AuthConfig           `yaml:"auth"`
 	AgentLimits  AgentLimits          `yaml:"agent_limits"`
 	AuditLogPath string               `yaml:"audit_log_path"`
 	MCPServers   map[string]MCPServer `yaml:"mcp_servers"`

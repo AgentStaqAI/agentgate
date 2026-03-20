@@ -1,23 +1,23 @@
 package proxy
 
 import (
-"bufio"
-"context"
-"crypto/rand"
-"encoding/hex"
-"encoding/json"
-"fmt"
-"io"
-"log"
-"net/http"
-"os"
-"os/exec"
-"path/filepath"
-"runtime"
-"strings"
-"sync"
-"sync/atomic"
-"time"
+	"bufio"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 )
 
 const stdioReadTimeout = 30 * time.Second
@@ -25,12 +25,12 @@ const stdioReadTimeout = 30 * time.Second
 // StdioBridge provides an HTTP bridge to a local CLI process using standard I/O pipes.
 // It implements http.Handler to simulate a reverse proxy.
 type StdioBridge struct {
-	cmd       *exec.Cmd
-	cmdString string
+	cmd        *exec.Cmd
+	cmdString  string
 	serverName string
-	mu        sync.Mutex
-	stdin     io.WriteCloser
-	exited    atomic.Bool // true once the child process has exited
+	mu         sync.Mutex
+	stdin      io.WriteCloser
+	exited     atomic.Bool // true once the child process has exited
 
 	sessionsMu  sync.RWMutex
 	sseSessions map[string]chan []byte
@@ -131,18 +131,18 @@ func NewStdioBridge(ctx context.Context, serverName string, cmdString string) (*
 	// Stream stdout
 	go func() {
 		scanner := bufio.NewScanner(stdout)
-		
+
 		// Increase buffer size to handle large JSON-RPC responses
-		buf := make([]byte, 1024*1024) // 1MB initial buf
+		buf := make([]byte, 1024*1024)    // 1MB initial buf
 		scanner.Buffer(buf, 10*1024*1024) // 10MB max token size
 
 		for scanner.Scan() {
 			line := scanner.Bytes()
-			
+
 			// We MUST make a copy of the line because scanner.Bytes() reuses the underlying array.
 			lineCopy := make([]byte, len(line))
 			copy(lineCopy, line)
-			
+
 			// Broadcast to all SSE sessions
 			bridge.sessionsMu.RLock()
 			for _, ch := range bridge.sseSessions {
@@ -155,167 +155,167 @@ func NewStdioBridge(ctx context.Context, serverName string, cmdString string) (*
 			bridge.sessionsMu.RUnlock()
 
 			// Check if it's a sync request response
-var env rpcEnvelope
-if err := json.Unmarshal(lineCopy, &env); err == nil && len(env.ID) > 0 {
-idStr := string(env.ID)
-bridge.syncRequestsMu.Lock()
-if ch, ok := bridge.syncRequests[idStr]; ok {
-ch <- lineCopy
-delete(bridge.syncRequests, idStr)
-}
-bridge.syncRequestsMu.Unlock()
-}
-}
-if scanErr := scanner.Err(); scanErr != nil {
-log.Printf("[StdioBridge] stdout scanner error for %s: %v", cmdString, scanErr)
-}
-log.Printf("[StdioBridge] stdout scanner goroutine ending for: %s", cmdString)
-}()
+			var env rpcEnvelope
+			if err := json.Unmarshal(lineCopy, &env); err == nil && len(env.ID) > 0 {
+				idStr := string(env.ID)
+				bridge.syncRequestsMu.Lock()
+				if ch, ok := bridge.syncRequests[idStr]; ok {
+					ch <- lineCopy
+					delete(bridge.syncRequests, idStr)
+				}
+				bridge.syncRequestsMu.Unlock()
+			}
+		}
+		if scanErr := scanner.Err(); scanErr != nil {
+			log.Printf("[StdioBridge] stdout scanner error for %s: %v", cmdString, scanErr)
+		}
+		log.Printf("[StdioBridge] stdout scanner goroutine ending for: %s", cmdString)
+	}()
 
-// Stream stderr line-by-line
-go func() {
-log.Printf("[StdioBridge] stderr reader goroutine started for: %s", cmdString)
-scanner := bufio.NewScanner(stderr)
-for scanner.Scan() {
-log.Printf("[StdioBridge stderr | %s] %s", cmdString, scanner.Text())
-}
-if scanErr := scanner.Err(); scanErr != nil {
-log.Printf("[StdioBridge] stderr scanner error for %s: %v", cmdString, scanErr)
-}
-log.Printf("[StdioBridge] stderr reader goroutine ending for: %s", cmdString)
-}()
+	// Stream stderr line-by-line
+	go func() {
+		log.Printf("[StdioBridge] stderr reader goroutine started for: %s", cmdString)
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			log.Printf("[StdioBridge stderr | %s] %s", cmdString, scanner.Text())
+		}
+		if scanErr := scanner.Err(); scanErr != nil {
+			log.Printf("[StdioBridge] stderr scanner error for %s: %v", cmdString, scanErr)
+		}
+		log.Printf("[StdioBridge] stderr reader goroutine ending for: %s", cmdString)
+	}()
 
-// Wait goroutine: marks bridge as exited and logs exit status.
-go func() {
-waitErr := cmd.Wait()
-bridge.exited.Store(true)
-if waitErr != nil {
-log.Printf("[StdioBridge] Process '%s' (PID %d) exited with ERROR: %v", cmdString, cmd.Process.Pid, waitErr)
-} else {
-log.Printf("[StdioBridge] Process '%s' (PID %d) exited gracefully", cmdString, cmd.Process.Pid)
-}
-}()
+	// Wait goroutine: marks bridge as exited and logs exit status.
+	go func() {
+		waitErr := cmd.Wait()
+		bridge.exited.Store(true)
+		if waitErr != nil {
+			log.Printf("[StdioBridge] Process '%s' (PID %d) exited with ERROR: %v", cmdString, cmd.Process.Pid, waitErr)
+		} else {
+			log.Printf("[StdioBridge] Process '%s' (PID %d) exited gracefully", cmdString, cmd.Process.Pid)
+		}
+	}()
 
-return bridge, nil
+	return bridge, nil
 }
 
 // ServeHTTP writes the HTTP JSON request payload to the child process Stdin,
 // and answers the HTTP request with the exact newline-delimited JSON response from Stdout.
 func (s *StdioBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
-// Check if process has already crashed using the atomic flag (race-free)
-if s.exited.Load() {
-log.Printf("[StdioBridge] Process already exited — returning 502")
-http.Error(w, "Bad Gateway: Child MCP process has crashed or exited", http.StatusBadGateway)
-return
-}
+	// Check if process has already crashed using the atomic flag (race-free)
+	if s.exited.Load() {
+		log.Printf("[StdioBridge] Process already exited — returning 502")
+		http.Error(w, "Bad Gateway: Child MCP process has crashed or exited", http.StatusBadGateway)
+		return
+	}
 
-// Route A: Async GET /sse
-// Route A1: Streamable HTTP Transport Unified Endpoint (/mcp endpoints)
-if strings.HasSuffix(r.URL.Path, "mcp") {
-s.handleStreamableHTTP(w, r)
-return
-}
+	// Route A: Async GET /sse
+	// Route A1: Streamable HTTP Transport Unified Endpoint (/mcp endpoints)
+	if strings.HasSuffix(r.URL.Path, "mcp") {
+		s.handleStreamableHTTP(w, r)
+		return
+	}
 
-if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "sse") {
-s.handleSSE(w, r)
-return
-}
+	if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "sse") {
+		s.handleSSE(w, r)
+		return
+	}
 
-if r.Method != http.MethodPost {
-http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-return
-}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
 
-// Route B: Async POST /message
-sessionId := r.URL.Query().Get("sessionId")
-if strings.HasSuffix(r.URL.Path, "message") && sessionId != "" {
-s.handleAsyncMessage(w, r, sessionId)
-return
-}
+	// Route B: Async POST /message
+	sessionId := r.URL.Query().Get("sessionId")
+	if strings.HasSuffix(r.URL.Path, "message") && sessionId != "" {
+		s.handleAsyncMessage(w, r, sessionId)
+		return
+	}
 
-// Route C: Sync POST legacy
-s.handleSyncLegacy(w, r)
+	// Route C: Sync POST legacy
+	s.handleSyncLegacy(w, r)
 }
 
 func (s *StdioBridge) handleSSE(w http.ResponseWriter, r *http.Request) {
-flusher, ok := w.(http.Flusher)
-if !ok {
-http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
-return
-}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
 
-sessionID := generateSessionID()
-ch := make(chan []byte, 100)
+	sessionID := generateSessionID()
+	ch := make(chan []byte, 100)
 
-s.sessionsMu.Lock()
-s.sseSessions[sessionID] = ch
-s.sessionsMu.Unlock()
+	s.sessionsMu.Lock()
+	s.sseSessions[sessionID] = ch
+	s.sessionsMu.Unlock()
 
-defer func() {
-s.sessionsMu.Lock()
-delete(s.sseSessions, sessionID)
-s.sessionsMu.Unlock()
-}()
+	defer func() {
+		s.sessionsMu.Lock()
+		delete(s.sseSessions, sessionID)
+		s.sessionsMu.Unlock()
+	}()
 
-w.Header().Set("Content-Type", "text/event-stream")
-w.Header().Set("Cache-Control", "no-cache")
-w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
 
-fmt.Fprintf(w, "event: endpoint\ndata: /message?sessionId=%s\n\n", sessionID)
-flusher.Flush()
+	fmt.Fprintf(w, "event: endpoint\ndata: /message?sessionId=%s\n\n", sessionID)
+	flusher.Flush()
 
-for {
-select {
-case msg := <-ch:
-fmt.Fprintf(w, "data: %s\n\n", msg)
-flusher.Flush()
-case <-r.Context().Done():
-return
-}
-}
+	for {
+		select {
+		case msg := <-ch:
+			fmt.Fprintf(w, "data: %s\n\n", msg)
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
 func (s *StdioBridge) handleAsyncMessage(w http.ResponseWriter, r *http.Request, sessionID string) {
-s.sessionsMu.RLock()
-_, exists := s.sseSessions[sessionID]
-s.sessionsMu.RUnlock()
+	s.sessionsMu.RLock()
+	_, exists := s.sseSessions[sessionID]
+	s.sessionsMu.RUnlock()
 
-if !exists {
-http.Error(w, "Invalid session ID", http.StatusBadRequest)
-return
-}
+	if !exists {
+		http.Error(w, "Invalid session ID", http.StatusBadRequest)
+		return
+	}
 
-body, err := io.ReadAll(r.Body)
-if err != nil {
-log.Printf("[StdioBridge] Failed to read HTTP request body: %v", err)
-http.Error(w, "Failed to read request body", http.StatusInternalServerError)
-return
-}
-defer r.Body.Close()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("[StdioBridge] Failed to read HTTP request body: %v", err)
+		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
+		return
+	}
+	defer r.Body.Close()
 
-if len(body) == 0 {
-http.Error(w, "Empty body", http.StatusBadRequest)
-return
-}
+	if len(body) == 0 {
+		http.Error(w, "Empty body", http.StatusBadRequest)
+		return
+	}
 
-payload := string(body)
-if !strings.HasSuffix(payload, "\n") {
-payload += "\n"
-}
+	payload := string(body)
+	if !strings.HasSuffix(payload, "\n") {
+		payload += "\n"
+	}
 
-s.mu.Lock()
-_, err = s.stdin.Write([]byte(payload))
-s.mu.Unlock()
+	s.mu.Lock()
+	_, err = s.stdin.Write([]byte(payload))
+	s.mu.Unlock()
 
-if err != nil {
-log.Printf("[StdioBridge] stdin write error: %v", err)
-http.Error(w, "Bad Gateway: Failed to write to MCP process", http.StatusBadGateway)
-return
-}
+	if err != nil {
+		log.Printf("[StdioBridge] stdin write error: %v", err)
+		http.Error(w, "Bad Gateway: Failed to write to MCP process", http.StatusBadGateway)
+		return
+	}
 
-w.WriteHeader(http.StatusAccepted)
-w.Write([]byte("Accepted"))
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte("Accepted"))
 }
 
 func (s *StdioBridge) handleStreamableHTTP(w http.ResponseWriter, r *http.Request) {
@@ -371,75 +371,73 @@ func (s *StdioBridge) handleStreamableHTTP(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *StdioBridge) handleSyncLegacy(w http.ResponseWriter, r *http.Request) {
-body, err := io.ReadAll(r.Body)
-if err != nil {
-log.Printf("[StdioBridge] Failed to read HTTP request body: %v", err)
-http.Error(w, "Failed to read request body", http.StatusInternalServerError)
-return
-}
-defer r.Body.Close()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("[StdioBridge] Failed to read HTTP request body: %v", err)
+		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
+		return
+	}
+	defer r.Body.Close()
 
-if len(body) == 0 {
-http.Error(w, "Empty body", http.StatusBadRequest)
-return
-}
+	if len(body) == 0 {
+		http.Error(w, "Empty body", http.StatusBadRequest)
+		return
+	}
 
+	var env rpcEnvelope
+	if err := json.Unmarshal(body, &env); err != nil {
+		http.Error(w, "Invalid JSON-RPC", http.StatusBadRequest)
+		return
+	}
 
-var env rpcEnvelope
-if err := json.Unmarshal(body, &env); err != nil {
-http.Error(w, "Invalid JSON-RPC", http.StatusBadRequest)
-return
-}
+	idStr := string(env.ID)
+	var ch chan []byte
 
-idStr := string(env.ID)
-var ch chan []byte
+	if len(env.ID) > 0 {
+		ch = make(chan []byte, 1)
+		s.syncRequestsMu.Lock()
+		s.syncRequests[idStr] = ch
+		s.syncRequestsMu.Unlock()
+	}
 
-if len(env.ID) > 0 {
-ch = make(chan []byte, 1)
-s.syncRequestsMu.Lock()
-s.syncRequests[idStr] = ch
-s.syncRequestsMu.Unlock()
-}
+	payload := string(body)
+	if !strings.HasSuffix(payload, "\n") {
+		payload += "\n"
+	}
 
-payload := string(body)
-if !strings.HasSuffix(payload, "\n") {
-payload += "\n"
-}
+	s.mu.Lock()
+	_, writeErr := s.stdin.Write([]byte(payload))
+	s.mu.Unlock()
 
-s.mu.Lock()
-_, writeErr := s.stdin.Write([]byte(payload))
-s.mu.Unlock()
+	if writeErr != nil {
+		log.Printf("[StdioBridge] stdin write error: %v", writeErr)
+		if ch != nil {
+			s.syncRequestsMu.Lock()
+			delete(s.syncRequests, idStr)
+			s.syncRequestsMu.Unlock()
+		}
+		http.Error(w, "Bad Gateway: Failed to write to MCP process", http.StatusBadGateway)
+		return
+	}
 
-if writeErr != nil {
-log.Printf("[StdioBridge] stdin write error: %v", writeErr)
-if ch != nil {
-s.syncRequestsMu.Lock()
-delete(s.syncRequests, idStr)
-s.syncRequestsMu.Unlock()
-}
-http.Error(w, "Bad Gateway: Failed to write to MCP process", http.StatusBadGateway)
-return
-}
+	// If no ID (e.g. notification), do not wait for response
+	if ch == nil {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 
-// If no ID (e.g. notification), do not wait for response
-if ch == nil {
-w.WriteHeader(http.StatusOK)
-return
-}
+	select {
+	case res := <-ch:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(res)
+		w.Write([]byte("\n"))
 
-
-select {
-case res := <-ch:
-w.Header().Set("Content-Type", "application/json")
-w.WriteHeader(http.StatusOK)
-w.Write(res)
-w.Write([]byte("\n"))
-
-case <-time.After(stdioReadTimeout):
-log.Printf("[StdioBridge] TIMEOUT after %s waiting for response", stdioReadTimeout)
-s.syncRequestsMu.Lock()
-delete(s.syncRequests, idStr)
-s.syncRequestsMu.Unlock()
-http.Error(w, fmt.Sprintf("Gateway Timeout: MCP process did not respond within %s", stdioReadTimeout), http.StatusGatewayTimeout)
-}
+	case <-time.After(stdioReadTimeout):
+		log.Printf("[StdioBridge] TIMEOUT after %s waiting for response", stdioReadTimeout)
+		s.syncRequestsMu.Lock()
+		delete(s.syncRequests, idStr)
+		s.syncRequestsMu.Unlock()
+		http.Error(w, fmt.Sprintf("Gateway Timeout: MCP process did not respond within %s", stdioReadTimeout), http.StatusGatewayTimeout)
+	}
 }

@@ -25,7 +25,7 @@ var serviceCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		action := args[0]
-		
+
 		absPath, err := filepath.Abs(configPath)
 		if err != nil {
 			log.Fatalf("Failed to resolve absolute config path: %v", err)

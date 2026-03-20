@@ -37,8 +37,6 @@ func Dispatch(
 	}
 }
 
-
-
 func dispatchSlack(webhookURL, serverName, toolName string, args map[string]any, reqID, token string) {
 	argsJSON, _ := json.MarshalIndent(args, "", "  ")
 	value := reqID + "|" + token // parsed by SlackInteractiveHandler

@@ -65,7 +65,7 @@ func SetupRouter(ctx context.Context, cfg *config.Config) http.Handler {
 			}
 			proxy := httputil.NewSingleHostReverseProxy(targetURL)
 			proxy.FlushInterval = time.Millisecond * 10
-			
+
 			// Wrap the proxy to inject our SSE namespace rewriter
 			srvName := name
 			baseHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

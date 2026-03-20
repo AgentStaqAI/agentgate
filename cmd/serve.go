@@ -34,7 +34,7 @@ func (p *program) run() {
 
 	// Spin up the background Unix domain socket (or TCP fallback) for IPC Panic commands
 	ipc.StartServer()
-	
+
 	p.srv = &http.Server{
 		Addr:    addr,
 		Handler: handler,
@@ -51,7 +51,7 @@ func (p *program) Stop(s service.Service) error {
 	if p.cancel != nil {
 		p.cancel()
 	}
-	
+
 	if p.srv != nil {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
