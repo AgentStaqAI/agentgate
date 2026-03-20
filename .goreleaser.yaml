@@ -44,6 +44,7 @@ brews:
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     homepage: "https://github.com/AgentStaqAI/agentgate"
-    description: "AgentGate Semantic Firewall and MCP Protocol Proxy"
+    description: "AgentGate — Zero-Trust Semantic Firewall and Protocol Bridge for MCP"
+    license: "Apache-2.0"
     install: |-
       bin.install "agentgate"
