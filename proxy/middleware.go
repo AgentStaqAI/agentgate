@@ -51,7 +51,6 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 			}
 		}
 
-
 		// Non-POST requests pass through directly (SSE GET, health checks, etc.).
 		if r.Method != http.MethodPost {
 			next.ServeHTTP(w, r)

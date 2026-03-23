@@ -25,11 +25,11 @@ type jwk struct {
 	Kid string `json:"kid"` // Key ID
 	Kty string `json:"kty"` // Key type ("RSA" or "EC")
 	Alg string `json:"alg"` // Algorithm (e.g. "RS256", "ES256")
-	
+
 	// RSA fields:
-	N   string `json:"n"`   // RSA modulus (base64url encoded)
-	E   string `json:"e"`   // RSA exponent (base64url encoded)
-	
+	N string `json:"n"` // RSA modulus (base64url encoded)
+	E string `json:"e"` // RSA exponent (base64url encoded)
+
 	// EC fields:
 	Crv string `json:"crv"` // Curve (e.g. "P-256")
 	X   string `json:"x"`   // EC X coordinate
