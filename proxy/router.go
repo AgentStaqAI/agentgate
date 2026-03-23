@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/agentgate/agentgate/auth"
 	"github.com/agentgate/agentgate/config"
 	"github.com/agentgate/agentgate/hitl"
 )
@@ -35,8 +36,8 @@ func (m *sseModifier) Write(b []byte) (int, error) {
 //
 // Route priority:
 //  1. /_agentgate/hitl/*  — internal HITL callbacks (no auth, no middleware)
-//  2. /{server-name}      — MCP server routes (Auth → HITL → Semantic → Upstream)
-func SetupRouter(ctx context.Context, cfg *config.Config) http.Handler {
+//  2. /{server-name}      — MCP server routes (JWTAuth → SemanticMiddleware → HITL → Upstream)
+func SetupRouter(ctx context.Context, cfg *config.Config, jwksCache *auth.JWKSCache) http.Handler {
 	mux := http.NewServeMux()
 
 	// ── Internal HITL callback routes ─────────────────────────────────────────
@@ -46,6 +47,20 @@ func SetupRouter(ctx context.Context, cfg *config.Config) http.Handler {
 	mux.HandleFunc("/_agentgate/hitl/deny", hitl.GetCallbackHandler(false))
 	mux.HandleFunc("/_agentgate/hitl/slack-interactive", hitl.SlackInteractiveHandler())
 	log.Println("[Router] Registered HITL callback routes")
+
+	// ── OAuth 2.1 Discovery ───────────────────────────────────────────────────
+	// Proactive IdP discovery for MCP clients. We redirect them directly to the IdP.
+	if cfg.OAuth2.Enabled && cfg.OAuth2.ResourceMetadata != "" {
+		discoveryHandler := func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, cfg.OAuth2.ResourceMetadata, http.StatusFound)
+		}
+		mux.HandleFunc("/.well-known/oauth-authorization-server", discoveryHandler)
+		// Register for each server path in case clients assume the tool path is the base URL
+		for name := range cfg.MCPServers {
+			mux.HandleFunc(fmt.Sprintf("/%s/.well-known/oauth-authorization-server", name), discoveryHandler)
+		}
+		log.Println("[Router] Registered OAuth 2.1 discovery endpoints")
+	}
 
 	// ── MCP server routes ─────────────────────────────────────────────────────
 	for name, srvConfig := range cfg.MCPServers {
@@ -75,8 +90,14 @@ func SetupRouter(ctx context.Context, cfg *config.Config) http.Handler {
 		}
 
 		// Middleware chain (innermost → outermost):
-		//   Upstream ← HITLMiddleware ← SemanticMiddleware
-		handler := SemanticMiddleware(cfg, name, srvConfig, HITLMiddleware(cfg, name, srvConfig, baseHandler))
+		//   Upstream ← HITLMiddleware ← SemanticMiddleware ← JWTAuthMiddleware
+		handler := auth.JWTAuthMiddleware(
+			cfg,
+			jwksCache,
+			SemanticMiddleware(cfg, name, srvConfig,
+				HITLMiddleware(cfg, name, srvConfig, baseHandler),
+			),
+		)
 
 		path := "/" + name
 		mux.Handle(path, http.StripPrefix(path, handler))

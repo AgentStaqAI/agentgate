@@ -7,6 +7,28 @@ version: "1.0"
 network:
   port: 8083
   public_url: "http://localhost:8083"
+#oauth2:
+#  enabled: true
+#
+#   # The Authorization Server that issues JWTs.
+#  issuer: "http://localhost:8080/realms/MCP-Development"
+#
+#   # The expected "aud" claim — typically identifies this AgentGate instance.
+#  audience: "cursor-client"
+#
+#   # Public key endpoint of the Authorization Server (for JWT signature verification).
+#  jwks_url: "http://localhost:8080/realms/MCP-Development/protocol/openid-connect/certs"
+#
+#   # Advertised in the WWW-Authenticate header so AI clients can discover the IdP.
+#  resource_metadata: "http://localhost:8080/realms/MCP-Development/.well-known/openid-configuration"
+#
+#   # How often to refresh JWKS keys for rotation support (default: 3600s).
+#   refresh_interval_seconds: 3600
+#
+#   # Inject X-AgentGate-User: <sub> and X-AgentGate-Scopes: <scopes> into
+#   # upstream requests so MCP servers know who initiated the call.
+#   inject_user_header: true
+
 auth:
   require_bearer_token: "8fa07a566c28730c8fcccc44eb686911"
 audit_log_path: "/Users/omkardeshmukh/development/agentgate/audit.log"

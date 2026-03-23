@@ -13,6 +13,7 @@ type Config struct {
 	Version      string               `yaml:"version"`
 	Network      NetworkConfig        `yaml:"network"`
 	Auth         AuthConfig           `yaml:"auth"`
+	OAuth2       OAuth2Config         `yaml:"oauth2"`
 	AgentLimits  AgentLimits          `yaml:"agent_limits"`
 	AuditLogPath string               `yaml:"audit_log_path"`
 	MCPServers   map[string]MCPServer `yaml:"mcp_servers"`
@@ -25,6 +26,37 @@ type NetworkConfig struct {
 
 type AuthConfig struct {
 	RequireBearerToken string `yaml:"require_bearer_token"`
+}
+
+// OAuth2Config configures AgentGate as an OAuth 2.1 Resource Server.
+// When Enabled is true, incoming requests must carry a valid RS256 JWT.
+// The static require_bearer_token check is automatically bypassed.
+type OAuth2Config struct {
+	// Enabled activates JWT validation. Default: false (static token mode).
+	Enabled bool `yaml:"enabled"`
+
+	// Issuer is the expected "iss" claim in the JWT (e.g. "https://auth.example.com").
+	Issuer string `yaml:"issuer"`
+
+	// Audience is the expected "aud" claim — typically the AgentGate resource identifier.
+	Audience string `yaml:"audience"`
+
+	// JWKSURL is the Authorization Server's public key endpoint.
+	// e.g. "https://auth.example.com/.well-known/jwks.json"
+	JWKSURL string `yaml:"jwks_url"`
+
+	// ResourceMetadata is the URL advertised in WWW-Authenticate challenges
+	// so AI clients can discover the Authorization Server.
+	// e.g. "https://auth.example.com/.well-known/oauth-authorization-server"
+	ResourceMetadata string `yaml:"resource_metadata"`
+
+	// RefreshIntervalSeconds controls how often JWKS keys are re-fetched for rotation.
+	// Default: 3600 (1 hour).
+	RefreshIntervalSeconds int `yaml:"refresh_interval_seconds"`
+
+	// InjectUserHeader, when true, adds X-AgentGate-User: <sub> and
+	// X-AgentGate-Scopes: <scope> to upstream requests.
+	InjectUserHeader bool `yaml:"inject_user_header"`
 }
 
 type AgentLimits struct {

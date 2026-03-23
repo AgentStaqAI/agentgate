@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/agentgate/agentgate/auth"
 	"github.com/agentgate/agentgate/config"
 	"github.com/agentgate/agentgate/ipc"
 	"github.com/agentgate/agentgate/proxy"
@@ -22,14 +23,33 @@ type program struct {
 }
 
 func (p *program) Start(s service.Service) error {
-	// Start should not block. Do the actual work async.
 	go p.run()
 	return nil
 }
 
 func (p *program) run() {
 	p.ctx, p.cancel = context.WithCancel(context.Background())
-	handler := proxy.SetupRouter(p.ctx, p.cfg)
+
+	// ── OAuth 2.1 JWKS cache ─────────────────────────────────────────────────
+	// When oauth2.enabled=true, fetch the Authorization Server's public keys
+	// for JWT signature verification. The cache refreshes in the background to
+	// handle key rotation transparently.
+	var jwksCache *auth.JWKSCache
+	if p.cfg.OAuth2.Enabled {
+		refreshInterval := time.Duration(p.cfg.OAuth2.RefreshIntervalSeconds) * time.Second
+		if refreshInterval <= 0 {
+			refreshInterval = time.Hour // sensible default
+		}
+		var err error
+		jwksCache, err = auth.NewJWKSCache(p.cfg.OAuth2.JWKSURL, refreshInterval)
+		if err != nil {
+			log.Fatalf("[OAuth2] Failed to initialize JWKS cache: %v", err)
+		}
+		log.Printf("[OAuth2] Resource Server mode enabled (issuer=%s, audience=%s)", p.cfg.OAuth2.Issuer, p.cfg.OAuth2.Audience)
+	}
+
+	handler := proxy.SetupRouter(p.ctx, p.cfg, jwksCache)
+
 	addr := fmt.Sprintf(":%d", p.cfg.Network.Port)
 
 	// Spin up the background Unix domain socket (or TCP fallback) for IPC Panic commands

@@ -33,19 +33,24 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
-		// ── Step 1: Bearer token auth ────────────────────────────────────────
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-			log.Printf("[Middleware] [ERROR] Missing or malformed Authorization header")
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
+		// ── Step 1: Auth ──────────────────────────────────────────────────────
+		// When OAuth2 is enabled, JWTAuthMiddleware (outer layer) already validated
+		// the JWT and enriched the context. Skip the static token check entirely.
+		if !cfg.OAuth2.Enabled {
+			authHeader := r.Header.Get("Authorization")
+			if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+				log.Printf("[Middleware] [ERROR] Missing or malformed Authorization header")
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			token := strings.TrimPrefix(authHeader, "Bearer ")
+			if token != cfg.Auth.RequireBearerToken {
+				log.Printf("[Middleware] [ERROR] Invalid bearer token")
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
 		}
-		token := strings.TrimPrefix(authHeader, "Bearer ")
-		if token != cfg.Auth.RequireBearerToken {
-			log.Printf("[Middleware] [ERROR] Invalid bearer token")
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
+
 
 		// Non-POST requests pass through directly (SSE GET, health checks, etc.).
 		if r.Method != http.MethodPost {

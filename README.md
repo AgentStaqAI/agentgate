@@ -49,19 +49,22 @@ Relying on "system prompts" for security is a guaranteed way to get your databas
 
 ## 🔥 Core Features
 
-### 1. Semantic RBAC & Parameter Sandbox 🔒
+### 1. Centralized OAuth 2.1 Resource Server 🛡️
+Stop writing custom OAuth logic for every single MCP tool you build! AgentGate acts as a spec-compliant OAuth 2.1 Resource Server. It validates JWTs, fetches JWKS keys (with background rotation), and bounces unauthenticated AI clients with `WWW-Authenticate` headers — completely decoupling auth from your business logic.
+
+### 2. Semantic RBAC & Parameter Sandbox 🔒
 Whitelist exactly which tools an agent can use. Go deeper with **regex rules on the parameters themselves** — e.g., the agent can only read files ending in `.log`, or can only `SELECT` but never `DELETE`.
 
-### 2. Human-in-the-Loop (HITL) ⏸️
+### 3. Human-in-the-Loop (HITL) ⏸️
 Automatically pause high-risk tool execution. AgentGate intercepts the request, pings your **Slack** or a CLI webhook, and physically holds the HTTP connection open until a human clicks **Approve** or **Deny**.
 
-### 3. Runaway Loop Breaker (Rate Limiting) ⏱️
+### 4. Runaway Loop Breaker (Rate Limiting) ⏱️
 Defeat hallucination loops. Cap tool executions per minute globally or **per MCP server**. If an agent spams a function, it instantly receives `HTTP 429`.
 
-### 4. The IPC Panic Button 🛑
+### 5. The IPC Panic Button 🛑
 If an agent goes completely rogue, type `agentgate service pause` in your terminal. This uses an isolated Unix Domain Socket to **instantly sever all autonomous tool execution** with a `503`, without exposing an admin endpoint to the network.
 
-### 5. stdio → HTTP Bridge 🌉
+### 6. stdio → HTTP Bridge 🌉
 MCP natively uses local `stdio`. AgentGate translates this to standard **HTTP/SSE**, letting you run tools in an isolated container or VPC while the LLM client stays local.
 
 ---

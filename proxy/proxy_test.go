@@ -57,7 +57,7 @@ func TestSemanticMiddleware(t *testing.T) {
 	}
 
 	// Setup Router
-	router := SetupRouter(context.Background(), cfg)
+	router := SetupRouter(context.Background(), cfg, nil)
 	proxyServer := httptest.NewServer(router)
 	defer proxyServer.Close()
 
