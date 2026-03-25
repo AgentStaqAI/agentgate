@@ -10,7 +10,9 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"encoding/json"
 
+	"github.com/agentgate/agentgate/analytics"
 	"github.com/agentgate/agentgate/auth"
 	"github.com/agentgate/agentgate/config"
 	"github.com/agentgate/agentgate/hitl"
@@ -23,6 +25,18 @@ type sseModifier struct {
 }
 
 func (m *sseModifier) Write(b []byte) (int, error) {
+	// Intercept the JSON-RPC Output payload returning to Agent
+	var env struct {
+		ID json.RawMessage `json:"id"`
+	}
+	line := b
+	if bytes.HasPrefix(b, []byte("data: ")) {
+		line = bytes.TrimPrefix(b, []byte("data: "))
+	}
+	if err := json.Unmarshal(line, &env); err == nil && len(env.ID) > 0 {
+		analytics.RecordOutput(m.serverName, string(env.ID), string(line))
+	}
+
 	// Fast path: check if this looks like our SSE endpoint notification
 	// "data: /message?sessionId="
 	if bytes.Contains(b, []byte("data: /message?sessionId=")) {
@@ -37,8 +51,9 @@ func (m *sseModifier) Write(b []byte) (int, error) {
 // Route priority:
 //  1. /_agentgate/hitl/*  — internal HITL callbacks (no auth, no middleware)
 //  2. /{server-name}      — MCP server routes (JWTAuth → SemanticMiddleware → HITL → Upstream)
-func SetupRouter(ctx context.Context, cfg *config.Config, jwksCache *auth.JWKSCache) http.Handler {
+func SetupRouter(ctx context.Context, cfg *config.Config, jwksCache *auth.JWKSCache) (http.Handler, []func()) {
 	mux := http.NewServeMux()
+	var cleanups []func()
 
 	// ── Internal HITL callback routes ─────────────────────────────────────────
 	// These bypass all auth middleware — a human clicking a Slack/Discord button
@@ -68,15 +83,22 @@ func SetupRouter(ctx context.Context, cfg *config.Config, jwksCache *auth.JWKSCa
 
 		if strings.HasPrefix(srvConfig.Upstream, "exec:") {
 			cmdString := strings.TrimSpace(strings.TrimPrefix(srvConfig.Upstream, "exec:"))
-			bridge, err := NewStdioBridge(ctx, name, cmdString)
+			bridge, err := NewStdioBridge(ctx, name, cmdString, srvConfig.Env)
 			if err != nil {
-				log.Fatalf("[Router] Failed to start StdioBridge for %s: %v", name, err)
+				log.Printf("[Router] Warning: Failed to start StdioBridge for %s: %v. Continuing without component...", name, err)
+				continue
 			}
+			cleanups = append(cleanups, func() {
+				if err := bridge.Close(); err != nil {
+					log.Printf("[Router] Warning: StdioBridge cleanup failed for %s: %v", name, err)
+				}
+			})
 			baseHandler = bridge
 		} else {
 			targetURL, err := url.Parse(srvConfig.Upstream)
 			if err != nil {
-				log.Fatalf("[Router] Invalid upstream URL for %s: %v", name, err)
+				log.Printf("[Router] Warning: Invalid upstream URL for %s: %v. Continuing without component...", name, err)
+				continue
 			}
 			proxy := httputil.NewSingleHostReverseProxy(targetURL)
 			proxy.FlushInterval = time.Millisecond * 10
@@ -102,8 +124,9 @@ func SetupRouter(ctx context.Context, cfg *config.Config, jwksCache *auth.JWKSCa
 		path := "/" + name
 		mux.Handle(path, http.StripPrefix(path, handler))
 		mux.Handle(path+"/", http.StripPrefix(path, handler))
-		log.Printf("[Router] Registered %q → %s (HITL: %v)", name, srvConfig.Upstream, len(srvConfig.Policies.HumanApproval.RequireForTools) > 0)
+		hitlEnabled := srvConfig.Policies.HumanApproval != nil && len(srvConfig.Policies.HumanApproval.RequireForTools) > 0
+		log.Printf("[Router] Registered %q → %s (HITL: %v)", name, srvConfig.Upstream, hitlEnabled)
 	}
 
-	return mux
+	return mux, cleanups
 }

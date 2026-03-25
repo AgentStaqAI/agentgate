@@ -13,6 +13,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/agentgate/agentgate/analytics"
+	"github.com/agentgate/agentgate/auth"
 	"github.com/agentgate/agentgate/config"
 	"github.com/agentgate/agentgate/logger"
 )
@@ -107,6 +109,8 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 				ClientIP:   r.RemoteAddr,
 				DurationMs: time.Since(start).Milliseconds(),
 			})
+			argsMap, _ := callReq.Params.Arguments.(map[string]any)
+			analytics.RecordRequest(serverName, "blocked_panic_button", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, argsMap, "Global Panic Switch Engaged", time.Since(start).Milliseconds())
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			w.Write([]byte(`{"error": "AgentGate is PAUSED. All autonomous actions are suspended."}`))
@@ -117,7 +121,7 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 		// Per-server rate_limit takes precedence over the global agent_limits.
 		maxReqs := cfg.AgentLimits.MaxRequestsPerMinute
 		window := time.Minute
-		if serverConfig.Policies.RateLimit.MaxRequests > 0 {
+		if serverConfig.Policies.RateLimit != nil && serverConfig.Policies.RateLimit.MaxRequests > 0 {
 			maxReqs = serverConfig.Policies.RateLimit.MaxRequests
 			if serverConfig.Policies.RateLimit.WindowSeconds > 0 {
 				window = time.Duration(serverConfig.Policies.RateLimit.WindowSeconds) * time.Second
@@ -126,17 +130,20 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 		if maxReqs > 0 {
 			if !Allow(serverName, toolName, maxReqs, window) {
 				log.Printf("[Middleware] [WARN] Rate limit exceeded for %s/%s", serverName, toolName)
+				reason := "Rate Limit Exceeded (Infinite Loop Protection)"
 				go logger.LogAuditAction(logger.AuditOptions{
 					LogPath:    cfg.AuditLogPath,
 					ServerName: serverName,
 					ToolName:   toolName,
 					Action:     "BLOCKED",
-					Reason:     "Rate Limit Exceeded (Infinite Loop Protection)",
+					Reason:     reason,
 					ClientIP:   r.RemoteAddr,
 					RequestID:  string(envelope.ID),
 					Arguments:  callReq.Params.Arguments,
 					DurationMs: time.Since(start).Milliseconds(),
 				})
+				analytics.RecordRequest(serverName, "blocked_rate_limit", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, callReq.Params.Arguments.(map[string]any), reason, time.Since(start).Milliseconds())
+
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusTooManyRequests)
 				w.Write([]byte(`{"error": "Rate limit exceeded. Infinite loop protection engaged."}`))
@@ -167,6 +174,8 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 					RequestID: string(envelope.ID), Arguments: callReq.Params.Arguments,
 					DurationMs: time.Since(start).Milliseconds(),
 				})
+				argsMap, _ := callReq.Params.Arguments.(map[string]any)
+				analytics.RecordRequest(serverName, "blocked_rbac", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, argsMap, "Explicit blocklist", time.Since(start).Milliseconds())
 				writeJSONRPCError(w, envelope.ID, jsonrpc.CodeMethodNotFound, msg)
 				return
 			}
@@ -187,31 +196,44 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 					RequestID: string(envelope.ID), Arguments: callReq.Params.Arguments,
 					DurationMs: time.Since(start).Milliseconds(),
 				})
+				argsMap, _ := callReq.Params.Arguments.(map[string]any)
+				analytics.RecordRequest(serverName, "blocked_rbac", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, argsMap, "Missing from allowlist", time.Since(start).Milliseconds())
 				writeJSONRPCError(w, envelope.ID, jsonrpc.CodeMethodNotFound, msg)
 				return
 			}
 		}
 
 		// ── Step 7: Regex Sandbox — parameter_rules check ───────────────────
-		if rule, exists := serverConfig.Policies.ParameterRules[toolName]; exists && rule.CompiledRegex != nil {
+		if rules, exists := serverConfig.Policies.ParameterRules[toolName]; exists {
 			args, ok := callReq.Params.Arguments.(map[string]any)
 			if !ok {
 				if rawArgs, err := json.Marshal(callReq.Params.Arguments); err == nil {
 					json.Unmarshal(rawArgs, &args)
 				}
 			}
-			if argVal, hasArg := args[rule.Argument]; hasArg {
-				argStr := fmt.Sprintf("%v", argVal)
-				if rule.CompiledRegex.MatchString(argStr) {
-					log.Printf("[Middleware] [ERROR] Regex sandbox triggered: %s", rule.ErrorMsg)
-					go logger.LogAuditAction(logger.AuditOptions{
-						LogPath: cfg.AuditLogPath, ServerName: serverName, ToolName: toolName,
-						Action: "BLOCKED", Reason: "regex sandbox match", ClientIP: r.RemoteAddr,
-						RequestID: string(envelope.ID), Arguments: callReq.Params.Arguments,
-						DurationMs: time.Since(start).Milliseconds(),
-					})
-					writeJSONRPCError(w, envelope.ID, jsonrpc.CodeInvalidParams, rule.ErrorMsg)
-					return
+
+			for _, rule := range rules {
+				if rule.CompiledRegex == nil {
+					continue
+				}
+				if argVal, hasArg := args[rule.Argument]; hasArg {
+					argStr := fmt.Sprintf("%v", argVal)
+					if rule.CompiledRegex.MatchString(argStr) {
+						errMsg := rule.ErrorMsg
+						if errMsg == "" {
+							errMsg = fmt.Sprintf("Security Block: Argument %q violates regex policy.", rule.Argument)
+						}
+						log.Printf("[Middleware] [ERROR] Regex sandbox triggered for argument %q: %s", rule.Argument, errMsg)
+						go logger.LogAuditAction(logger.AuditOptions{
+							LogPath: cfg.AuditLogPath, ServerName: serverName, ToolName: toolName,
+							Action: "BLOCKED", Reason: "regex sandbox match", ClientIP: r.RemoteAddr,
+							RequestID: string(envelope.ID), Arguments: callReq.Params.Arguments,
+							DurationMs: time.Since(start).Milliseconds(),
+						})
+						analytics.RecordRequest(serverName, "blocked_regex", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, args, errMsg, time.Since(start).Milliseconds())
+						writeJSONRPCError(w, envelope.ID, jsonrpc.CodeInvalidParams, errMsg)
+						return
+					}
 				}
 			}
 		}
@@ -224,6 +246,8 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 			RequestID: string(envelope.ID), Arguments: callReq.Params.Arguments,
 			DurationMs: time.Since(start).Milliseconds(),
 		})
+		argsMap, _ := callReq.Params.Arguments.(map[string]any)
+		analytics.RecordRequest(serverName, "allowed", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, argsMap, "Passed Semantic Firewall", time.Since(start).Milliseconds())
 		next.ServeHTTP(w, r)
 	})
 }

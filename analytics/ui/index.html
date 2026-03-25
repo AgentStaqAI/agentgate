@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentGate Observability</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Alpine.js for lightweight reactivity -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+
+
+    <style>
+        .sse-row-enter {
+            animation: highlight 1.5s ease-out;
+        }
+
+        @keyframes highlight {
+            from {
+                background-color: rgba(56, 189, 248, 0.3);
+            }
+
+            to {
+                background-color: transparent;
+            }
+        }
+        /* Glassmorphism Classes */
+        .glass {
+            background: rgba(17, 24, 39, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-right: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .glass-header {
+            background: rgba(17, 24, 39, 0.8);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        /* Status Pulse Animation */
+        @keyframes pulse-glow {
+            0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+            70% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+        }
+        .status-pulse {
+            animation: pulse-glow 2s infinite;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-950 text-gray-200 font-sans h-screen flex overflow-hidden" x-data="dashboard()">
+    <!-- Sidebar -->
+    <aside class="w-64 bg-gray-900 border-r border-gray-800 flex-col hidden md:flex shrink-0">
+        <div class="p-4 border-b border-gray-800 flex items-center space-x-3 h-16">
+            <div
+                class="w-8 h-8 bg-blue-500 shadow-lg shadow-blue-500/20 rounded-lg flex items-center justify-center shrink-0">
+                <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z">
+                    </path>
+                </svg>
+            </div>
+            <h1 class="text-xl font-bold tracking-tight text-white whitespace-nowrap">AgentGate</h1>
+        </div>
+
+        <nav class="flex-1 p-4 space-y-2 overflow-y-auto">
+            <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Observability</div>
+            <button @click="view = 'dashboard'"
+                :class="view === 'dashboard' ? 'bg-blue-500/10 text-blue-400' : 'text-gray-400 hover:bg-gray-800/50 hover:text-white'"
+                class="w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                </svg>
+                <span>Live Traffic</span>
+            </button>
+            <button @click="view = 'heatmap'"
+                :class="view === 'heatmap' ? 'bg-blue-500/10 text-blue-400' : 'text-gray-400 hover:bg-gray-800/50 hover:text-white'"
+                class="w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z">
+                    </path>
+                </svg>
+                <span>Policy Heatmap</span>
+            </button>
+            <button @click="view = 'rules'"
+                :class="view === 'rules' ? 'bg-blue-500/10 text-blue-400' : 'text-gray-400 hover:bg-gray-800/50 hover:text-white'"
+                class="w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <span>Policy Rules</span>
+            </button>
+            <div class="pt-6 pb-2">
+                <div class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Management</div>
+                <button @click="view = 'onboarding'"
+                    :class="view === 'onboarding' ? 'bg-green-500/10 text-green-400' : 'text-gray-400 hover:bg-gray-800/50 hover:text-white'"
+                    class="w-full flex items-center space-x-3 px-3 py-2 rounded-lg font-medium transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                    </svg>
+                    <span>Add Upstream</span>
+                </button>
+            </div>
+        </nav>
+
+        <div class="p-4 border-t border-gray-800 text-sm bg-gray-900/50">
+            <div class="flex items-center p-3 bg-gray-800/40 rounded-lg border border-white/5 shadow-inner">
+                <span class="relative flex h-2 w-2 mr-3">
+                    <span :class="connected ? 'animate-ping bg-green-400' : 'bg-red-400'"
+                        class="absolute inline-flex h-full w-full rounded-full opacity-75"></span>
+                    <span :class="connected ? 'bg-green-500 status-pulse' : 'bg-red-500'"
+                        class="relative inline-flex rounded-full h-2 w-2"></span>
+                </span>
+                <span x-text="connected ? 'SSE Connected' : 'Disconnected'" class="text-gray-500 text-xs font-medium uppercase tracking-wider"></span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Mobile Header (Visible only on small screens) -->
+    <header class="md:hidden glass-header p-4 shrink-0" x-data="{ menuOpen: false }">
+        <div class="flex justify-between items-center">
+            <div class="flex items-center space-x-3">
+                <div class="w-7 h-7 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
+                    <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z">
+                        </path>
+                    </svg>
+                </div>
+                <h1 class="text-lg font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">AgentGate</h1>
+            </div>
+            <button @click="menuOpen = !menuOpen" class="text-gray-400 hover:text-white focus:outline-none">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16">
+                    </path>
+                </svg>
+            </button>
+        </div>
+        <div x-show="menuOpen" class="mt-4 flex flex-col space-y-2 border-t border-gray-800 pt-4" x-transition>
+            <button @click="view = 'dashboard'; menuOpen = false" class="text-left font-medium p-2 rounded"
+                :class="view === 'dashboard' ? 'bg-blue-500/10 text-blue-400' : 'text-gray-400'">Live Traffic</button>
+            <button @click="view = 'heatmap'; menuOpen = false" class="text-left font-medium p-2 rounded"
+                :class="view === 'heatmap' ? 'bg-blue-500/10 text-blue-400' : 'text-gray-400'">Policy Heatmap</button>
+            <button @click="view = 'rules'; menuOpen = false" class="text-left font-medium p-2 rounded"
+                :class="view === 'rules' ? 'bg-blue-500/10 text-blue-400' : 'text-gray-400'">Policy Rules</button>
+            <button @click="view = 'onboarding'; menuOpen = false" class="text-left font-medium p-2 rounded"
+                :class="view === 'onboarding' ? 'bg-green-500/10 text-green-400' : 'text-gray-400'">Add
+                Upstream</button>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto bg-[#0a0c10] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-900/5 via-[#0a0c10] to-[#0a0c10]">
+
+        <!-- ======================= DASHBOARD TAB ======================= -->
+        <div x-show="view === 'dashboard'" class="space-y-8" x-transition.opacity>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                    <div class="text-gray-500 text-xs font-medium uppercase tracking-wider mb-2">Total Requests</div>
+                    <div class="text-3xl font-semibold text-white" x-text="stats.total">—</div>
+                </div>
+                <div class="bg-gray-900 border border-red-900/30 rounded-xl p-5">
+                    <div class="text-red-400/80 text-xs font-medium uppercase tracking-wider mb-2">Blocked</div>
+                    <div class="text-3xl font-semibold text-red-400" x-text="stats.blocked">—</div>
+                </div>
+                <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                    <div class="text-gray-500 text-xs font-medium uppercase tracking-wider mb-2">Avg Latency</div>
+                    <div class="text-3xl font-semibold text-white"><span x-text="stats.avg_latency">—</span><span
+                            class="text-sm font-normal text-gray-500 ml-1">ms</span></div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-8">
+                <!-- Component A: Live Traffic -->
+                <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden flex flex-col max-h-[75vh]">
+                    <div class="px-5 py-3 border-b border-gray-800 flex justify-between items-center">
+                        <h2 class="text-sm font-semibold text-gray-200 tracking-wide">Live Traffic</h2>
+                        <span class="text-xs text-gray-600 font-mono">/api/stream</span>
+                    </div>
+                    <div class="overflow-auto flex-1 p-0">
+                        <table class="w-full text-sm text-left">
+                            <thead class="text-xs text-gray-500 bg-gray-800/60 uppercase tracking-wider sticky top-0">
+                                <tr>
+                                    <th class="px-4 py-2.5 font-medium">Time</th>
+                                    <th class="px-4 py-2.5 font-medium">Status</th>
+                                    <th class="px-4 py-2.5 font-medium">Server</th>
+                                    <th class="px-4 py-2.5 font-medium">Tool</th>
+                                    <th class="px-4 py-2.5 font-medium">Arguments / Reason</th>
+                                    <th class="px-4 py-2.5 font-medium">OAuth Client ID</th>
+                                </tr>
+                            </thead>
+                            <template x-for="req in firehose" :key="req.id">
+                                <tbody class="divide-y divide-gray-800 hover:bg-gray-800/30 transition-colors group"
+                                    x-data="{ expanded: false }">
+                                    <tr class="sse-row-enter cursor-pointer" @click="expanded = !expanded">
+                                        <td class="px-4 py-2.5 font-mono text-xs text-gray-500 group-hover:text-gray-300 transition-colors whitespace-nowrap"
+                                            x-text="formatTime(req.timestamp)"></td>
+                                        <td class="px-4 py-2.5">
+                                            <span class="px-2 py-0.5 rounded text-xs font-medium"
+                                                :class="getStatusClass(req.status)" x-text="req.status"></span>
+                                        </td>
+                                        <td class="px-4 py-2.5 font-mono text-xs text-purple-300"
+                                            x-text="req.server_name"></td>
+                                        <td class="px-4 py-2.5 font-mono text-xs text-blue-300" x-text="req.tool_name">
+                                        </td>
+                                        <td class="px-4 py-2.5 w-1/3">
+                                            <div x-show="req.status === 'allowed'"
+                                                class="font-mono text-xs text-gray-500 truncate max-w-xs"
+                                                x-text="JSON.stringify(req.arguments)"></div>
+                                            <div x-show="req.status !== 'allowed'"
+                                                class="font-mono text-xs text-red-400 truncate max-w-xs"
+                                                x-text="req.reason"></div>
+                                        </td>
+                                        <td class="px-4 py-2.5 font-mono text-xs text-gray-600 truncate max-w-[140px]"
+                                            :title="req.agent_id" x-text="req.agent_id || '—'"></td>
+                                    </tr>
+                                    <tr x-show="expanded" x-transition.opacity style="display: none;">
+                                        <td colspan="6" class="p-0 border-t border-gray-800 bg-gray-950/80">
+                                            <div class="p-4 grid grid-cols-2 gap-6 shadow-inner">
+                                                <div class="space-y-2">
+                                                    <h4
+                                                        class="text-xs uppercase font-bold tracking-widest text-blue-400 flex items-center">
+                                                        <svg class="w-3.5 h-3.5 mr-1.5" fill="none"
+                                                            stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round"
+                                                                stroke-width="2"
+                                                                d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1">
+                                                            </path>
+                                                        </svg>
+                                                        Input Payload
+                                                    </h4>
+                                                    <pre class="bg-gray-900 border border-gray-800 p-3 rounded-lg text-xs leading-relaxed text-blue-300 overflow-auto whitespace-pre-wrap font-mono h-[300px] shadow-inner"
+                                                        x-text="formatJSON(req.input_payload)"></pre>
+                                                </div>
+                                                <div class="space-y-2">
+                                                    <h4
+                                                        class="text-xs uppercase font-bold tracking-widest text-green-400 flex items-center">
+                                                        <svg class="w-3.5 h-3.5 mr-1.5" fill="none"
+                                                            stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round"
+                                                                stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7"></path>
+                                                        </svg>
+                                                        Upstream Output Payload
+                                                    </h4>
+                                                    <pre class="bg-gray-900 border border-gray-800 p-3 rounded-lg text-xs leading-relaxed text-green-300 overflow-auto whitespace-pre-wrap font-mono h-[300px] shadow-inner"
+                                                        x-text="formatJSON(req.output_payload)"></pre>
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </template>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ======================= HEATMAP TAB ======================= -->
+        <div x-show="view === 'heatmap'" style="display: none;" x-transition.opacity>
+            <!-- Component C: Policy Heatmap -->
+            <div class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-sm max-w-4xl mx-auto">
+                <div class="px-5 py-3 border-b border-gray-800">
+                    <h2 class="text-sm font-semibold text-gray-200 tracking-wide">Policy Heatmap</h2>
+                </div>
+                <div class="overflow-auto">
+                    <table class="w-full text-sm text-left">
+                        <thead class="text-xs text-gray-500 uppercase tracking-wider bg-gray-800/60">
+                            <tr>
+                                <th class="px-5 py-2.5 font-medium">Server</th>
+                                <th class="px-5 py-2.5 font-medium">Tool</th>
+                                <th class="px-5 py-2.5 font-medium w-56">Allow / Block</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-800">
+                            <template x-for="stat in heatmap" :key="stat.server_name + '_' + stat.tool_name">
+                                <tr class="hover:bg-gray-800/30 transition-colors border-b border-gray-800/50">
+                                    <td class="px-5 py-3 font-mono text-xs text-purple-300" x-text="stat.server_name">
+                                    </td>
+                                    <td class="px-5 py-3 font-mono text-xs text-blue-300" x-text="stat.tool_name"></td>
+                                    <td class="px-5 py-3">
+                                        <div class="flex items-center gap-3">
+                                            <div class="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden flex">
+                                                <div class="h-full bg-green-500"
+                                                    :style="`width: ${(stat.allowed_calls / stat.total_calls) * 100}%`">
+                                                </div>
+                                                <div class="h-full bg-red-500"
+                                                    :style="`width: ${(stat.blocked_calls / stat.total_calls) * 100}%`">
+                                                </div>
+                                            </div>
+                                            <div class="font-mono text-xs text-gray-500 min-w-[48px] text-right">
+                                                <span class="text-green-400" x-text="stat.allowed_calls"></span><span
+                                                    class="text-gray-700"> / </span><span class="text-red-400"
+                                                    x-text="stat.blocked_calls"></span>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ======================= RULES TAB ======================= -->
+        <div x-show="view === 'rules'" style="display: none;" x-transition.opacity class="space-y-6">
+            <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Server Policies</h2>
+
+            <template x-for="[serverName, serverCfg] in Object.entries(configData?.MCPServers || {})" :key="serverName">
+                <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 max-w-4xl relative overflow-hidden">
+                    <div class="absolute top-3 right-4">
+                        <span
+                            class="px-2 py-0.5 bg-gray-800 rounded text-[10px] font-mono uppercase tracking-widest text-gray-400 border border-gray-700"
+                            x-text="(serverCfg.Policies?.access_mode || serverCfg.Policies?.AccessMode) || 'allowlist'"></span>
+                    </div>
+
+                    <div class="flex items-center gap-3 mb-1">
+                        <div
+                            class="w-8 h-8 bg-gray-800 rounded-lg flex items-center justify-center border border-gray-700 shrink-0">
+                            <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M5 12h14M12 5l7 7-7 7"></path>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="text-base font-semibold text-white" x-text="serverName"></h3>
+                            <div class="text-gray-500 text-xs font-mono mt-0.5"
+                                x-text="(serverCfg.Command || serverCfg.Upstream || 'unknown upstream').substring(0, 70)">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-5 space-y-5">
+                        <!-- Allowed Tools -->
+                        <div
+                            x-show="(serverCfg.Policies?.allowed_tools || serverCfg.Policies?.AllowedTools)?.length > 0">
+                            <h4
+                                class="text-xs uppercase tracking-widest font-semibold text-green-400 mb-3 flex items-center">
+                                <span
+                                    class="w-2 h-2 rounded-full bg-green-500 mr-2 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></span>
+                                Guaranteed Access
+                            </h4>
+                            <div class="flex flex-wrap gap-2">
+                                <template
+                                    x-for="tool in (serverCfg.Policies?.allowed_tools || serverCfg.Policies?.AllowedTools)">
+                                    <span
+                                        class="px-3 py-1.5 bg-green-900/20 border border-green-800/50 text-green-300 rounded-md text-sm font-mono shadow-sm transition hover:bg-green-900/40"
+                                        x-text="tool"></span>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Blocked Tools -->
+                        <div
+                            x-show="(serverCfg.Policies?.blocked_tools || serverCfg.Policies?.BlockedTools)?.length > 0">
+                            <h4
+                                class="text-xs uppercase tracking-widest font-semibold text-red-500 mb-3 flex items-center">
+                                <span
+                                    class="w-2 h-2 rounded-full bg-red-600 mr-2 shadow-[0_0_8px_rgba(220,38,38,0.6)]"></span>
+                                Hard Blocklist
+                            </h4>
+                            <div class="flex flex-wrap gap-2">
+                                <template
+                                    x-for="tool in (serverCfg.Policies?.blocked_tools || serverCfg.Policies?.BlockedTools)">
+                                    <span
+                                        class="px-3 py-1.5 bg-red-900/20 border border-red-800/50 text-red-300 rounded-md text-sm font-mono shadow-sm transition hover:bg-red-900/40"
+                                        x-text="tool"></span>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Regex sandbox -->
+                        <div
+                            x-show="(serverCfg.Policies?.parameter_rules || serverCfg.Policies?.ParameterRules) && Object.keys((serverCfg.Policies?.parameter_rules || serverCfg.Policies?.ParameterRules) || {}).length > 0">
+                            <h4
+                                class="text-xs uppercase tracking-widest font-semibold text-purple-400 mb-3 flex items-center">
+                                <span
+                                    class="w-2 h-2 rounded-full bg-purple-500 mr-2 shadow-[0_0_8px_rgba(168,85,247,0.6)]"></span>
+                                Semantic Firewall Engines
+                            </h4>
+                            <div class="space-y-3">
+                                <template
+                                    x-for="[tName, rules] in Object.entries((serverCfg.Policies?.parameter_rules || serverCfg.Policies?.ParameterRules) || {})">
+                                    <div
+                                        class="bg-gray-950 p-4 rounded-lg border border-gray-800 shadow-inner group transition hover:border-purple-900/50 space-y-3">
+                                        <div class="flex items-center mb-1">
+                                            <span class="text-blue-300 font-bold font-mono tracking-tight"
+                                                x-text="tName"></span>
+                                        </div>
+                                        <template x-for="rule in rules || []">
+                                            <div class="pl-3 border-l-2 border-gray-800 space-y-1">
+                                                <div class="flex items-center space-x-2">
+                                                    <span
+                                                        class="text-[10px] text-yellow-500 bg-yellow-900/20 px-2 py-0.5 rounded uppercase tracking-wider font-mono border border-yellow-800/50"
+                                                        x-text="'Arg: ' + (rule.argument || rule.Argument)"></span>
+                                                </div>
+                                                <div class="text-xs text-red-400 font-mono break-words pl-2 border-l-2 border-red-900/50"
+                                                    x-text="(rule.not_match_regex || rule.NotMatchRegex) ? 'BLOCKED MATCH: ' + (rule.not_match_regex || rule.NotMatchRegex) : ((rule.match_regex || rule.MatchRegex) ? 'MUST MATCH: ' + (rule.match_regex || rule.MatchRegex) : '')">
+                                                </div>
+                                                <div class="mt-1 text-xs text-gray-500 italic"
+                                                    x-text="rule.error_msg || rule.ErrorMsg"></div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- HITL -->
+                        <div
+                            x-show="(serverCfg.Policies?.human_approval?.require_for_tools || serverCfg.Policies?.HumanApproval?.RequireForTools)?.length > 0">
+                            <h4
+                                class="text-xs uppercase tracking-widest font-semibold text-yellow-400 mb-3 flex items-center">
+                                <span
+                                    class="w-2 h-2 rounded-full bg-yellow-500 mr-2 shadow-[0_0_8px_rgba(234,179,8,0.6)]"></span>
+                                High-Risk (HITL) Intercepts
+                            </h4>
+                            <div class="flex flex-wrap gap-2">
+                                <template
+                                    x-for="tool in ((serverCfg.Policies?.human_approval?.require_for_tools || serverCfg.Policies?.HumanApproval?.RequireForTools) || [])">
+                                    <span
+                                        class="px-3 py-1.5 bg-yellow-900/20 border border-yellow-800/50 text-yellow-300 rounded-md text-sm font-mono shadow-sm transition hover:bg-yellow-900/40 flex items-center">
+                                        <svg class="w-3 h-3 mr-1.5" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fill-rule="evenodd"
+                                                d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z"
+                                                clip-rule="evenodd"></path>
+                                        </svg>
+                                        <span x-text="tool"></span>
+                                    </span>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- ======================= ONBOARDING TAB ======================= -->
+        <div x-show="view === 'onboarding'" style="display: none;" x-transition.opacity class="space-y-6 max-w-4xl">
+            <h2 class="text-base font-semibold text-white mb-1">Add Upstream</h2>
+            <p class="text-gray-500 text-sm mb-5">Paste your existing <code
+                    class="text-blue-400 font-mono text-xs bg-gray-800 px-1 py-0.5 rounded">mcp.json</code> and
+                AgentGate will discover all tools, letting you configure per-tool policies before applying.</p>
+
+            <!-- Discovery Form -->
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-sm">
+                <label class="block text-sm font-medium text-gray-300 mb-2">Claude Desktop / Cursor mcp.json</label>
+                <div class="flex flex-col space-y-3">
+                    <textarea x-model="discoveryJson"
+                        placeholder='{&#10;  "mcpServers": {&#10;    "postgres": {&#10;      "command": "npx",&#10;      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"]&#10;    }&#10;  }&#10;}'
+                        rows="6"
+                        class="flex-1 bg-gray-950 border border-gray-800 text-gray-200 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 outline-none tracking-wide font-mono resize-y"></textarea>
+                    <div class="flex justify-end">
+                        <button @click="discover()" :disabled="discovering || !discoveryJson"
+                            class="text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:ring-blue-800 font-medium rounded-lg text-sm px-5 py-2.5 text-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                            <span x-show="!discovering">Discover Tools</span>
+                            <span x-show="discovering" class="flex items-center">
+                                <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
+                                    xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                                        stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor"
+                                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                                    </path>
+                                </svg>
+                                Scanning...
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Configuration Sandbox Builder -->
+            <div x-show="Object.keys(discoveredToolsByServer).length > 0 || Object.keys(discoveredErrors).length > 0"
+                x-transition class="space-y-6 mt-8">
+
+                <!-- Failed Network Streams Panel -->
+                <div x-show="Object.keys(discoveredErrors).length > 0"
+                    class="bg-red-950/30 border border-red-900 rounded-xl p-6 shadow-sm">
+                    <h3 class="text-sm font-semibold text-red-400 mb-3 flex items-center gap-2">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z">
+                            </path>
+                        </svg>
+                        Connection Failures
+                    </h3>
+                    <div class="space-y-3">
+                        <template x-for="[serverName, errMsg] in Object.entries(discoveredErrors)" :key="serverName">
+                            <div class="bg-gray-900/50 rounded-lg p-3 border-l-4 border-l-red-600">
+                                <div class="text-white font-mono font-bold text-sm mb-1" x-text="serverName"></div>
+                                <div class="text-red-300 font-mono text-xs break-all" x-text="errMsg"></div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <template x-for="[serverName, tools] in Object.entries(discoveredToolsByServer)" :key="serverName">
+                    <div x-show="tools && tools.length > 0"
+                        class="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-sm">
+                        <h3 class="text-sm font-semibold text-gray-300 mb-3"><span x-text="serverName"></span></h3>
+
+                        <div class="space-y-4">
+                            <template x-for="tool in tools" :key="tool.name">
+                                <div class="bg-gray-950 border border-gray-800 rounded-lg p-4 transition"
+                                    :class="onboardForms[serverName].tools[tool.name]?.allowed ? 'border-l-4 border-l-green-500' : 'border-l-4 border-l-red-500'">
+                                    <div class="flex items-start justify-between">
+                                        <div class="flex-1">
+                                            <div class="flex items-center space-x-3">
+                                                <h4 class="text-sm font-medium font-mono text-blue-300"
+                                                    x-text="tool.name"></h4>
+                                                <span x-show="onboardForms[serverName].tools[tool.name]?.allowed"
+                                                    class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider bg-green-900/40 text-green-400 border border-green-800">ALLOWED</span>
+                                                <span x-show="!onboardForms[serverName].tools[tool.name]?.allowed"
+                                                    class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider bg-red-900/40 text-red-400 border border-red-800">BLOCKED</span>
+                                            </div>
+                                            <p class="text-xs text-gray-500 mt-1 max-w-2xl leading-relaxed"
+                                                x-text="tool.description || 'No description provided by upstream.'"></p>
+                                        </div>
+                                        <div class="flex items-center space-x-4">
+                                            <label class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox"
+                                                    x-model="onboardForms[serverName].tools[tool.name].allowed"
+                                                    class="sr-only peer">
+                                                <div
+                                                    class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500">
+                                                </div>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <!-- Sandbox configuration shown if tool is allowed -->
+                                    <div x-show="onboardForms[serverName].tools[tool.name]?.allowed" x-transition
+                                        class="mt-4 pt-4 border-t border-gray-800/50 space-y-4">
+                                        <!-- HITL Configuration -->
+                                        <div class="space-y-3">
+                                            <div class="flex items-center">
+                                                <input type="checkbox" :id="'hitl_'+serverName+'_'+tool.name"
+                                                    x-model="onboardForms[serverName].tools[tool.name].hitl"
+                                                    class="w-4 h-4 text-yellow-500 bg-gray-900 border-gray-700 rounded focus:ring-yellow-600 focus:ring-2">
+                                                <label :for="'hitl_'+serverName+'_'+tool.name"
+                                                    class="ml-2 text-sm font-medium text-yellow-400">Require Human
+                                                    Approval
+                                                    (HITL) before execution — defaults to 300s timeout</label>
+                                            </div>
+                                            <!-- HITL Webhook Config (shown when HITL is enabled) -->
+                                            <div x-show="onboardForms[serverName].tools[tool.name].hitl" x-transition
+                                                class="ml-6 mt-2 p-4 bg-yellow-950/20 border border-yellow-900/40 rounded-lg space-y-3">
+                                                <div class="grid grid-cols-3 gap-3">
+                                                    <div>
+                                                        <label
+                                                            class="block text-xs text-yellow-300 font-semibold mb-1">Approval
+                                                            Channel</label>
+                                                        <select
+                                                            x-model="onboardForms[serverName].tools[tool.name].hitlChannel"
+                                                            class="w-full bg-gray-900 border border-gray-700 text-gray-200 text-sm rounded-lg p-2 outline-none focus:ring-yellow-500 focus:border-yellow-500">
+                                                            <option value="terminal">Terminal (CLI)</option>
+                                                            <option value="slack">Slack Webhook</option>
+                                                            <option value="discord">Discord Webhook</option>
+                                                            <option value="generic">Generic Webhook</option>
+                                                        </select>
+                                                    </div>
+                                                    <div class="col-span-2">
+                                                        <label
+                                                            class="block text-xs text-yellow-300 font-semibold mb-1">Webhook
+                                                            URL
+                                                            <span class="text-gray-500 font-normal ml-1">(leave blank
+                                                                for terminal)</span>
+                                                        </label>
+                                                        <input type="url"
+                                                            x-model="onboardForms[serverName].tools[tool.name].hitlWebhook"
+                                                            placeholder="https://hooks.slack.com/services/..."
+                                                            class="w-full bg-gray-900 border border-gray-700 text-gray-200 text-sm rounded-lg p-2 outline-none focus:ring-yellow-500 focus:border-yellow-500 font-mono">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="bg-gray-900/50 p-3 rounded-lg border border-gray-800"
+                                            x-show="Object.keys(tool.inputSchema?.properties || {}).length > 0">
+                                            <label
+                                                class="block text-xs font-semibold text-purple-400 uppercase tracking-widest mb-3">Regex
+                                                Parameter Blocklist (Optional)</label>
+                                            <div class="space-y-3">
+                                                <template
+                                                    x-for="[propKey, propVal] in Object.entries(tool.inputSchema?.properties || {})"
+                                                    :key="propKey">
+                                                    <div class="flex items-center space-x-3">
+                                                        <div class="w-1/3">
+                                                            <div class="text-xs font-mono text-gray-300 font-bold"
+                                                                x-text="propKey"></div>
+                                                            <div class="text-[10px] text-gray-500 truncate mt-0.5"
+                                                                x-text="propVal.description || propVal.type || 'string'">
+                                                            </div>
+                                                        </div>
+                                                        <div class="flex-1">
+                                                            <input type="text"
+                                                                x-model="onboardForms[serverName].tools[tool.name].regexMap[propKey]"
+                                                                :placeholder="'BLOCK MATCH regex e.g. (?i)DROP'"
+                                                                class="bg-gray-950 border border-gray-800 text-gray-300 text-xs rounded-lg focus:ring-purple-500 focus:border-purple-500 block w-full p-2 outline-none font-mono">
+                                                        </div>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+
+                <div class="mt-8 flex justify-end">
+                    <button @click="saveOnboarding()" :disabled="saving"
+                        class="text-white bg-green-600 hover:bg-green-700 focus:ring-4 focus:ring-green-800 font-medium rounded-lg text-sm px-6 py-3 text-center transition-colors disabled:opacity-50 flex items-center shadow-lg shadow-green-900/20">
+                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <span x-show="!saving">Generate &amp; Apply Firewall Config</span>
+                        <span x-show="saving">Applying Live Hot-Reload...</span>
+                    </button>
+                </div>
+
+                <!-- ════ Client Config Snippet ════ -->
+                <div id="client-json-panel" x-show="generatedClientJson !== null" x-transition
+                    class="mt-8 bg-gray-900 border border-green-800/50 rounded-xl p-6 shadow-lg">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <h3 class="text-lg font-bold text-green-400 flex items-center">
+                                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                Proxy Config Ready!
+                            </h3>
+                            <p class="text-gray-400 text-sm mt-1">Paste this into your <code
+                                    class="text-blue-300 font-mono text-xs bg-gray-800 px-1.5 py-0.5 rounded">claude_desktop_config.json</code>
+                                or Cursor <code
+                                    class="text-blue-300 font-mono text-xs bg-gray-800 px-1.5 py-0.5 rounded">mcp.json</code>.
+                                AgentGate is now the secure proxy.</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button
+                                @click="navigator.clipboard.writeText(generatedClientJson); clientJsonCopied = true; setTimeout(() => clientJsonCopied = false, 2000)"
+                                class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+                                :class="clientJsonCopied ? 'bg-green-700 text-white' : 'bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700'">
+                                <svg x-show="!clientJsonCopied" class="w-4 h-4" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z">
+                                    </path>
+                                </svg>
+                                <svg x-show="clientJsonCopied" class="w-4 h-4" fill="none" stroke="currentColor"
+                                    viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M5 13l4 4L19 7"></path>
+                                </svg>
+                                <span x-text="clientJsonCopied ? 'Copied!' : 'Copy JSON'"></span>
+                            </button>
+                            <button
+                                @click="generatedClientJson = null; discoveryJson = ''; discoveredToolsByServer = {}; view = 'rules'"
+                                class="px-4 py-2 rounded-lg text-sm font-medium bg-blue-700 hover:bg-blue-600 text-white transition-all">
+                                Go to Dashboard →
+                            </button>
+                        </div>
+                    </div>
+                    <pre class="bg-gray-950 border border-gray-800 rounded-lg p-4 text-sm font-mono text-green-300 overflow-x-auto leading-relaxed"
+                        x-text="generatedClientJson"></pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast notification -->
+        <div x-show="toastMsg !== ''" x-transition x-cloak class="fixed bottom-5 right-5 z-50">
+            <div
+                class="bg-green-900/90 border border-green-500 text-green-100 px-6 py-3 rounded-lg shadow-2xl flex items-center space-x-3">
+                <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+                <span class="font-medium tracking-wide" x-text="toastMsg"></span>
+            </div>
+        </div>
+        </div>
+    </main>
+
+    <script>
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('dashboard', () => ({
+                view: 'dashboard',
+                connected: false,
+                firehose: [],
+                stats: { total: 0, blocked: 0, avg_latency: 0 },
+                heatmap: [],
+                configData: {},
+
+                // Onboarding State
+                discoveryJson: '',
+                discovering: false,
+                mcpServers: {},
+                discoveredToolsByServer: {},
+                discoveredErrors: {},
+                onboardForms: {},
+                saving: false,
+                toastMsg: '',
+                generatedClientJson: null,
+                clientJsonCopied: false,
+
+                async init() {
+                    this.fetchHistory();
+                    this.fetchMetrics();
+                    await this.fetchConfig();
+
+                    if (Object.keys(this.configData?.MCPServers || {}).length === 0) {
+                        this.view = 'onboarding';
+                    }
+
+                    // Poll metrics/heatmap every 5 seconds as a fallback
+                    setInterval(() => this.fetchMetrics(), 5000);
+
+                    // Setup EventSource for Component A
+                    const eventSource = new EventSource('/api/stream');
+
+                    eventSource.onopen = () => { this.connected = true; };
+                    eventSource.onerror = () => { this.connected = false; };
+
+                    eventSource.onmessage = (e) => {
+                        try {
+                            const data = JSON.parse(e.data);
+
+                            // Handle real-time output patch: find the row by jsonrpc_id and update it in-place
+                            if (data.type === 'output_patch') {
+                                const row = this.firehose.find(req => req.jsonrpc_id === data.jsonrpc_id);
+                                if (row) {
+                                    row.output_payload = data.output_payload;
+                                }
+                                return;
+                            }
+
+                            // Normal new request event: prepend to firehose if not already present
+                            if (!this.firehose.find(req => req.id === data.id)) {
+                                this.firehose.unshift(data);
+                                if (this.firehose.length > 50) this.firehose.pop();
+                            }
+
+                            // Immediately refresh metrics silently so top counter ticks
+                            this.fetchMetrics();
+                        } catch (err) { }
+                    };
+                },
+
+                async fetchHistory() {
+                    try {
+                        let res = await fetch('/api/history');
+                        let historyData = await res.json();
+                        // historyData comes from DB ordered by DESC (newest first).
+                        // We set firehose directly to it.
+                        this.firehose = historyData;
+                    } catch (e) {
+                        console.error('Failed to fetch history', e);
+                    }
+                },
+
+                async fetchMetrics() {
+                    try {
+                        let res = await fetch('/api/stats');
+                        let data = await res.json();
+                        data.avg_latency = Math.round(data.avg_latency);
+                        this.stats = data;
+
+                        let hmRes = await fetch('/api/heatmap');
+                        this.heatmap = await hmRes.json();
+                    } catch (e) {
+                        console.error('Failed to fetch metrics', e);
+                    }
+                },
+
+                async fetchConfig() {
+                    try {
+                        let res = await fetch('/api/config');
+                        this.configData = await res.json();
+                    } catch (e) {
+                        console.error('Failed to fetch config', e);
+                    }
+                },
+
+                formatTime(isoString) {
+                    if (!isoString || isoString === 'now') return new Date().toLocaleTimeString();
+                    const d = new Date(isoString);
+                    return isNaN(d) ? new Date().toLocaleTimeString() : d.toLocaleTimeString();
+                },
+
+                formatJSON(str) {
+                    if (!str) return 'Waiting for async response payload...';
+                    try {
+                        return JSON.stringify(JSON.parse(str), null, 2);
+                    } catch (e) {
+                        return str;
+                    }
+                },
+
+                getStatusClass(status) {
+                    if (status === 'allowed') return 'bg-green-900/60 text-green-400 border border-green-800';
+                    if (status.startsWith('blocked')) return 'bg-red-900/60 text-red-400 border border-red-800';
+                    if (status === 'pending_hitl') return 'bg-yellow-900/60 text-yellow-400 border border-yellow-800';
+                    return 'bg-gray-800 text-gray-300 border border-gray-700';
+                },
+
+                async discover() {
+                    if (!this.discoveryJson) return;
+                    this.discovering = true;
+                    this.discoveredToolsByServer = {};
+                    this.discoveredErrors = {};
+                    this.onboardForms = {};
+                    try {
+                        let parsedJson = JSON.parse(this.discoveryJson);
+                        if (!parsedJson.mcpServers) {
+                            throw new Error("Missing 'mcpServers' root key in JSON.");
+                        }
+
+                        this.mcpServers = parsedJson.mcpServers;
+
+                        let res = await fetch('/api/discover', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: this.discoveryJson
+                        });
+
+                        if (!res.ok) throw new Error(await res.text());
+
+                        let payloadMap = await res.json();
+                        this.discoveredToolsByServer = payloadMap.discovered || {};
+                        this.discoveredErrors = payloadMap.errors || {};
+
+                        // Check if ANY servers successfully returned tools
+                        let globalToolsCount = 0;
+                        for (let tools of Object.values(this.discoveredToolsByServer)) {
+                            globalToolsCount += tools.length;
+                        }
+
+                        // Replaced the blocking Javascript exception to allow Alpine to naturally paint the 'Connection Failures' box
+
+                        // Seed the form variables for each operational server
+                        for (let [serverName, tools] of Object.entries(this.discoveredToolsByServer)) {
+                            if (tools.length === 0) continue;
+                            this.onboardForms[serverName] = { tools: {} };
+                            for (let t of tools) {
+                                this.onboardForms[serverName].tools[t.name] = {
+                                    allowed: true,
+                                    hitl: false,
+                                    hitlChannel: 'terminal',
+                                    hitlWebhook: '',
+                                    regexMap: {}
+                                };
+                            }
+                        }
+                    } catch (e) {
+                        alert('Discovery strike failed: ' + e.message);
+                    } finally {
+                        this.discovering = false;
+                    }
+                },
+
+                async saveOnboarding() {
+                    this.saving = true;
+                    try {
+                        let finalPayload = { mcpServers: {} };
+
+                        for (let [serverName, srvData] of Object.entries(this.mcpServers)) {
+                            let allowedToolsArr = [];
+                            let blockedToolsArr = [];
+                            let hitlToolsArr = [];
+                            let parameterRulesMap = {};
+
+                            let toolsDiscovered = this.discoveredToolsByServer[serverName] || [];
+
+                            for (let t of toolsDiscovered) {
+                                let state = this.onboardForms[serverName].tools[t.name];
+                                if (state.allowed) {
+                                    allowedToolsArr.push(t.name);
+                                    if (state.hitl) hitlToolsArr.push(t.name);
+                                    if (Object.keys(state.regexMap || {}).length > 0) {
+                                        let rules = [];
+                                        for (let [propKey, regexVal] of Object.entries(state.regexMap)) {
+                                            if (regexVal && regexVal.trim() !== '') {
+                                                rules.push({
+                                                    argument: propKey,
+                                                    not_match_regex: regexVal,
+                                                    error_msg: "Security Block: Sandbox Violation on " + propKey
+                                                });
+                                            }
+                                        }
+                                        if (rules.length > 0) {
+                                            parameterRulesMap[t.name] = rules;
+                                        }
+                                    }
+                                } else {
+                                    blockedToolsArr.push(t.name);
+                                }
+                            }
+
+                            finalPayload.mcpServers[serverName] = {
+                                command: srvData.command,
+                                args: srvData.args,
+                                env: srvData.env,
+                                transport: srvData.transport,
+                                url: srvData.url,
+                                policies: {
+                                    access_mode: "allowlist",
+                                    allowed_tools: allowedToolsArr.length > 0 ? allowedToolsArr : undefined,
+                                    blocked_tools: blockedToolsArr.length > 0 ? blockedToolsArr : undefined
+                                }
+                            };
+
+                            if (Object.keys(parameterRulesMap).length > 0) {
+                                finalPayload.mcpServers[serverName].policies.parameter_rules = parameterRulesMap;
+                            }
+
+                            if (hitlToolsArr.length > 0) {
+                                const hitlState = this.onboardForms[serverName].tools[hitlToolsArr[0]];
+                                finalPayload.mcpServers[serverName].policies.human_approval = {
+                                    require_for_tools: hitlToolsArr,
+                                    timeout_seconds: 300,
+                                    webhook: {
+                                        type: hitlState.hitlChannel || 'terminal',
+                                        url: hitlState.hitlWebhook || ''
+                                    }
+                                };
+                            }
+                        }
+
+                        let res = await fetch('/api/config/save', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(finalPayload)
+                        });
+
+                        if (!res.ok) throw new Error(await res.text());
+
+                        this.toastMsg = 'GitOps config applied safely! Proxy is live.';
+                        setTimeout(() => this.toastMsg = '', 4000);
+
+                        await this.fetchConfig(); // Reload config
+
+                        // Build the client-ready mcpServers JSON snippet
+                        const proxyPort = this.configData?.Network?.Port || this.configData?.network?.port || 56123;
+
+                        // Auth: include header only for a real (non-placeholder) static bearer token
+                        const isOAuth = !!(this.configData?.OAuth2?.Enabled);
+                        const token = this.configData?.Auth?.RequireBearerToken || '';
+                        const needsHeader = !isOAuth && token !== '';
+
+                        const clientServers = {};
+                        for (const [serverName, serverData] of Object.entries(finalPayload.mcpServers)) {
+                            const base = `http://localhost:${proxyPort}/${serverName}`;
+
+                            // Use /mcp (Streamable HTTP) only when the upstream itself is an
+                            // http(s) URL ending with /mcp — meaning the server speaks the 2025
+                            // Streamable HTTP transport. For all exec: upstreams use /sse.
+                            const upstreamUrl = serverData.url || '';
+                            const transport = (upstreamUrl.startsWith('http') && upstreamUrl.endsWith('/mcp'))
+                                ? 'mcp'
+                                : 'sse';
+
+                            const entry = { url: `${base}/${transport}` };
+                            if (needsHeader) {
+                                entry.headers = { Authorization: `Bearer ${token}` };
+                            }
+
+                            clientServers[serverName] = entry;
+                        }
+
+                        this.generatedClientJson = JSON.stringify({ mcpServers: clientServers }, null, 2);
+
+                        // Scroll the result into view (don't switch away yet)
+                        this.$nextTick(() => {
+                            document.getElementById('client-json-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        });
+
+                    } catch (e) {
+                        alert("Failed to save: " + e.message);
+                    } finally {
+                        this.saving = false;
+                    }
+                }
+            }));
+        });
+    </script>
+</body>
+
+</html>

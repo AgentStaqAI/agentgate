@@ -43,13 +43,13 @@ func TestSemanticMiddleware(t *testing.T) {
 				Upstream: upstreamServer.URL,
 				Policies: config.SecurityPolicy{
 					AllowedTools: []string{"safe_tool", "data_tool"},
-					ParameterRules: map[string]config.ParameterRule{
-						"safe_tool": {
+					ParameterRules: map[string][]config.ParameterRule{
+						"safe_tool": {{
 							Argument:      "query",
 							NotMatchRegex: "(?i)(DROP|DELETE)",
 							ErrorMsg:      "Blocked Query",
 							CompiledRegex: regexp.MustCompile("(?i)(DROP|DELETE)"),
-						},
+						}},
 					},
 				},
 			},
@@ -57,7 +57,7 @@ func TestSemanticMiddleware(t *testing.T) {
 	}
 
 	// Setup Router
-	router := SetupRouter(context.Background(), cfg, nil)
+	router, _ := SetupRouter(context.Background(), cfg, nil)
 	proxyServer := httptest.NewServer(router)
 	defer proxyServer.Close()
 

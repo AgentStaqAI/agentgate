@@ -23,9 +23,9 @@ mcp_servers:
       parameter_rules:
         # Block access to localhost, internal IPs, and file:// protocol (SSRF protection)
         fetch:
-          argument: "url"
-          not_match_regex: "(localhost|127\\.0\\.0\\.1|192\\.168\\.|10\\.|file://|169\\.254\\.)"
-          error_msg: "Security Block: Fetching local/internal network addresses is not allowed (SSRF protection)."
+          - argument: "url"
+            not_match_regex: "(localhost|127\\.0\\.0\\.1|192\\.168\\.|10\\.|file://|169\\.254\\.)"
+            error_msg: "Security Block: Fetching local/internal network addresses is not allowed (SSRF protection)."
 
       rate_limit:
         max_requests: 20

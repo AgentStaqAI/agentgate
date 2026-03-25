@@ -14,7 +14,7 @@ func TestStdioBridge(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	bridge, err := NewStdioBridge(ctx, "test_server", "cat")
+	bridge, err := NewStdioBridge(ctx, "test_server", "cat", nil)
 	if err != nil {
 		t.Fatalf("Failed to create StdioBridge: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestStdioBridge_InvalidMethod(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	bridge, err := NewStdioBridge(ctx, "test_server", "cat")
+	bridge, err := NewStdioBridge(ctx, "test_server", "cat", nil)
 	if err != nil {
 		t.Fatalf("Failed to create StdioBridge: %v", err)
 	}

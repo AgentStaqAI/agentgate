@@ -33,15 +33,15 @@ mcp_servers:
       parameter_rules:
         # Block any path attempting to escape the allowed directory via traversal
         read_file:
-          argument: "path"
-          not_match_regex: "\\.\\."
-          error_msg: "Security Block: Directory traversal (../) is not allowed."
+          - argument: "path"
+            not_match_regex: "\\.\\."
+            error_msg: "Security Block: Directory traversal (../) is not allowed."
 
         # Only allow searching text files, not binaries or configs
         search_files:
-          argument: "pattern"
-          not_match_regex: "(\\.env|\\.pem|\\.key|\\.ssh/)"
-          error_msg: "Security Block: Searching sensitive file types is not allowed."
+          - argument: "pattern"
+            not_match_regex: "(\\.env|\\.pem|\\.key|\\.ssh/)"
+            error_msg: "Security Block: Searching sensitive file types is not allowed."
 
       # Uncomment to require human approval before any write operations
       # human_approval:

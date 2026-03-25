@@ -46,9 +46,9 @@ mcp_servers:
       parameter_rules:
         # Prevent the agent from touching main/master branches directly
         create_pull_request:
-          argument: "base"
-          not_match_regex: "^(main|master|production|prod|release)$"
-          error_msg: "Security Block: PRs targeting protected branches require manual pipeline approval."
+          - argument: "base"
+            not_match_regex: "^(main|master|production|prod|release)$"
+            error_msg: "Security Block: PRs targeting protected branches require manual pipeline approval."
 
       rate_limit:
         max_requests: 30

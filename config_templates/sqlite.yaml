@@ -28,9 +28,9 @@ mcp_servers:
       parameter_rules:
         # Block all mutating SQL statements on the read_query tool as a defense-in-depth measure
         read_query:
-          argument: "query"
-          not_match_regex: "(?i)\\b(DROP|DELETE|TRUNCATE|ALTER|UPDATE|INSERT|CREATE|REPLACE)\\b"
-          error_msg: "Security Block: Only SELECT statements are permitted."
+          - argument: "query"
+            not_match_regex: "(?i)\\b(DROP|DELETE|TRUNCATE|ALTER|UPDATE|INSERT|CREATE|REPLACE)\\b"
+            error_msg: "Security Block: Only SELECT statements are permitted."
 
       # Uncomment for write access with human approval
       # human_approval:

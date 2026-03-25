@@ -12,6 +12,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 
+	"github.com/agentgate/agentgate/analytics"
+	"github.com/agentgate/agentgate/auth"
 	"github.com/agentgate/agentgate/config"
 	"github.com/agentgate/agentgate/hitl"
 	"github.com/agentgate/agentgate/logger"
@@ -24,7 +26,7 @@ func HITLMiddleware(cfg *config.Config, serverName string, serverConfig config.M
 	ha := serverConfig.Policies.HumanApproval
 
 	// Fast-path: if no tools require approval, bypass entirely.
-	if len(ha.RequireForTools) == 0 {
+	if ha == nil || len(ha.RequireForTools) == 0 {
 		return next
 	}
 
@@ -109,7 +111,13 @@ func HITLMiddleware(cfg *config.Config, serverName string, serverConfig config.M
 		// ── Fire dispatcher (always in goroutine) ─────────────────────────────
 		// terminal mode: the goroutine blocks on stdin and sends into decisionChan
 		// all other modes: fires HTTP POST and returns immediately
-		go hitl.Dispatch(ha.Webhook, cfg.Network.PublicURL, serverName, toolName, args, reqID, token, decisionChan)
+		var wh config.WebhookConfig
+		if ha.Webhook != nil {
+			wh = *ha.Webhook
+		}
+		go hitl.Dispatch(wh, cfg.Network.PublicURL, serverName, toolName, args, reqID, token, decisionChan)
+
+		analytics.RecordRequest(serverName, "pending_hitl", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, args, "Waiting for human approval", time.Since(start).Milliseconds())
 
 		// ── Block: wait for decision or timeout ───────────────────────────────
 		ctx, cancel := context.WithTimeout(r.Context(), time.Duration(timeoutSecs)*time.Second)
@@ -131,6 +139,7 @@ func HITLMiddleware(cfg *config.Config, serverName string, serverConfig config.M
 					Approver:   decision.Approver,
 					DurationMs: time.Since(start).Milliseconds(),
 				})
+				analytics.RecordRequest(serverName, "allowed", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, args, "Approved by "+decision.Approver, time.Since(start).Milliseconds())
 				r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 				next.ServeHTTP(w, r)
 			} else {
@@ -147,6 +156,7 @@ func HITLMiddleware(cfg *config.Config, serverName string, serverConfig config.M
 					Approver:   decision.Approver,
 					DurationMs: time.Since(start).Milliseconds(),
 				})
+				analytics.RecordRequest(serverName, "blocked_hitl", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, args, "Denied by "+decision.Approver, time.Since(start).Milliseconds())
 				writeJSONRPCError(w, envelope.ID, jsonrpc.CodeInternalError,
 					fmt.Sprintf("Human denied execution of tool %q", toolName))
 			}
@@ -165,6 +175,7 @@ func HITLMiddleware(cfg *config.Config, serverName string, serverConfig config.M
 				Arguments:  args,
 				DurationMs: time.Since(start).Milliseconds(),
 			})
+			analytics.RecordRequest(serverName, "blocked_hitl_timeout", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, args, "Human approval timed out", time.Since(start).Milliseconds())
 			writeJSONRPCError(w, envelope.ID, jsonrpc.CodeInternalError,
 				fmt.Sprintf("Human approval timed out after %d seconds for tool %q", timeoutSecs, toolName))
 		}

@@ -33,9 +33,9 @@ mcp_servers:
       parameter_rules:
         # Even with HITL, block mutations at the firewall level as defense-in-depth
         query:
-          argument: "sql"
-          not_match_regex: "(?i)\\b(DROP|DELETE|TRUNCATE|ALTER|UPDATE|INSERT|CREATE|GRANT|REVOKE)\\b"
-          error_msg: "Security Block: This agent has read-only access to the production database."
+          - argument: "sql"
+            not_match_regex: "(?i)\\b(DROP|DELETE|TRUNCATE|ALTER|UPDATE|INSERT|CREATE|GRANT|REVOKE)\\b"
+            error_msg: "Security Block: This agent has read-only access to the production database."
       human_approval:
         require_for_tools:
           - "query"               # Every single Postgres query must be approved by a human
@@ -58,9 +58,9 @@ mcp_servers:
         - "describe_table"
       parameter_rules:
         read_query:
-          argument: "query"
-          not_match_regex: "(?i)\\b(DROP|DELETE|TRUNCATE|ALTER|UPDATE|INSERT)\\b"
-          error_msg: "Security Block: Only SELECT queries are permitted on the analytics cache."
+          - argument: "query"
+            not_match_regex: "(?i)\\b(DROP|DELETE|TRUNCATE|ALTER|UPDATE|INSERT)\\b"
+            error_msg: "Security Block: Only SELECT queries are permitted on the analytics cache."
       rate_limit:
         max_requests: 50
         window_seconds: 60
@@ -74,9 +74,9 @@ mcp_servers:
         - "fetch"
       parameter_rules:
         fetch:
-          argument: "url"
-          not_match_regex: "(localhost|127\\.0\\.0\\.1|192\\.168\\.|10\\.|file://)"
-          error_msg: "Security Block: Fetching internal network addresses is not allowed."
+          - argument: "url"
+            not_match_regex: "(localhost|127\\.0\\.0\\.1|192\\.168\\.|10\\.|file://)"
+            error_msg: "Security Block: Fetching internal network addresses is not allowed."
       rate_limit:
         max_requests: 15
         window_seconds: 60

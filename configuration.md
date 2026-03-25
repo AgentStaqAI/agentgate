@@ -1,16 +1,26 @@
 # Configuration Guide (`agentgate.yaml`)
 
-AgentGate relies on an overarching `agentgate.yaml` file to define routing namespaces, strict network port allocations, and fine-grained Agent security policies.
+AgentGate relies on a single `agentgate.yaml` file to define routing namespaces, network bindings, authentication, and fine-grained security policies per MCP server.
 
-## Example Structure
+---
+
+## Full Reference Example
 
 ```yaml
-# ── Authentication ────────────────────────────────────────────────────────────
-# Option A: Simple Static Token
-# auth:
-#   require_bearer_token: "secret_admin_token_123"
+version: "1.0"
 
-# Option B: Full OAuth 2.1 Resource Server
+# ── Network ───────────────────────────────────────────────────────────────────
+network:
+  port: 8083           # Main proxy port (where your LLM clients connect)
+  admin_port: 8081     # Embedded dashboard & admin API
+  public_url: "https://your-ngrok-url.ngrok-free.dev"  # Required for HITL callback URLs
+
+# ── Authentication ─────────────────────────────────────────────────────────────
+# Option A: Simple static bearer token
+auth:
+  require_bearer_token: "my-secret-token"
+
+# Option B: Full OAuth 2.1 Resource Server (comment out Option A to use this)
 oauth2:
   enabled: true
   issuer: "https://auth.example.com"
@@ -18,76 +28,116 @@ oauth2:
   jwks_url: "https://auth.example.com/.well-known/jwks.json"
   resource_metadata: "https://auth.example.com/.well-known/oauth-authorization-server"
   refresh_interval_seconds: 3600
-  inject_user_header: true
+  inject_user_header: true   # Injects X-AgentGate-User and X-AgentGate-Scopes upstream
 
-# ── Global Limits & Telemetry ─────────────────────────────────────────────────
+# ── Global Limits ──────────────────────────────────────────────────────────────
 agent_limits:
-  max_requests_per_minute: 120    # Global infinite loop limit across all tools
+  max_requests_per_minute: 120    # Global rate limit across all tools
 
-audit_log_path: "audit.log"       # Telemetry output for parsing tools executing
+audit_log_path: "audit.log"      # Structured audit output path
 
+# ── MCP Servers ────────────────────────────────────────────────────────────────
 mcp_servers:
-  local_mcp_namespace:
-    upstream: "exec:/opt/homebrew/bin/npx -y @modelcontextprotocol/server-filesystem /Users/myuser/dev"
+
+  # --- Stdio Bridge (exec:) ---
+  filesystem:
+    upstream: "exec:npx -y @modelcontextprotocol/server-filesystem /home/user/projects"
+    env:
+      SOME_ENV_VAR: "value"       # Injected into the child process environment
     policies:
-      access_mode: "allowlist"    # Fail-secure default: Deny all tools natively unless explicit
+      access_mode: "allowlist"   # "allowlist" (deny-by-default) or "blocklist" (allow-by-default)
       allowed_tools:
-        - "read_file"
-      
+        - read_file
+        - list_directory
       parameter_rules:
-        # Prevent the LLM from reading sensitive ssh and system keys
-        "read_file":
+        read_file:
           argument_key: "path"
           not_match_regex: "\\.ssh/|/etc/shadow"
-          error_msg: "Security Block: Regex Sandbox prevented access to secure SSH/System architecture keys."
+          error_msg: "Security Block: Access to sensitive paths is denied."
+      rate_limit:
+        max_requests: 60
+        window_seconds: 60
 
-  database_postgres:
-    # Notice this maps to an actual running network proxy! 
-    upstream: "http://localhost:9099"
+  # --- HTTP Reverse Proxy ---
+  my_postgres:
+    upstream: "http://localhost:9090"
     policies:
       access_mode: "allowlist"
       allowed_tools:
-        - "read_query"
-        - "execute_query"
-      
-      # Stop the execution and wait for a human to type /approve in Slack!
+        - execute_query
       human_approval:
         require_for_tools:
-          - "execute_query"
-        timeout_seconds: 300
+          - execute_query
+        timeout_seconds: 300      # Default: 300 seconds. Agent request is held open until approval.
         webhook:
-          type: "slack"
-          url: "https://hooks.slack.com/services/T..."
+          type: "slack"           # Options: "slack", "discord", "terminal", "generic"
+          url: "https://hooks.slack.com/services/T.../B.../..."
 
-      rate_limit:
-        max_requests: 10
-        window_seconds: 60
+  # --- Docker Container (also exec:) ---
+  google-maps:
+    upstream: "exec: docker run -i --rm -e GOOGLE_MAPS_API_KEY mcp/google-maps"
+    env:
+      GOOGLE_MAPS_API_KEY: "your-api-key-here"
+    policies:
+      access_mode: "allowlist"
+      allowed_tools:
+        - maps_directions
+        - maps_search_places
 ```
+
+---
 
 ## Key Configuration Fields
 
-### 1. Centralized OAuth 2.1 (`oauth2`)
-Ditch the `auth.require_bearer_token` static secret and turn AgentGate into a spec-compliant OAuth 2.1 Resource Server. By setting `oauth2.enabled: true`, AgentGate will automatically:
-- Intercept unauthenticated AI clients and bounce them with `WWW-Authenticate` headers pointing to your `resource_metadata` IdP exactly per the MCP spec.
-- Fetch and cache your IdP's public keys from `jwks_url` (with background rotation every `refresh_interval_seconds`).
-- Cryptographically validate RS256/ES256 JWT signatures entirely in-memory using zero external dependencies.
-- (Optional) Cleanly strip the JWT and inject `X-AgentGate-User` / `X-AgentGate-Scopes` upstream so your underlying MCP tools know *who* made the request, without ever having to write OAuth validation logic inside your tool code!
+### 1. `network`
+- `port` — The main proxy port. Your AI client connects here.
+- `admin_port` — The embedded observability dashboard and admin API.
+- `public_url` — Publicly reachable base URL. Required so AgentGate can build correct HITL callback URLs for Slack/Discord buttons to reach back.
 
-### 2. The Matrix Map (`mcp_servers`)
-Think of `mcp_servers` as a dictionary mapping arbitrary *names* (`local_mcp_namespace`) to raw endpoints or executables (`upstream`). The key acts as your connection namespace!
-- The LLM Agent dials: `http://localhost:8083/local_mcp_namespace/mcp`.
-- AgentGate natively connects the resulting JSON-RPC stream to the local file system `npx` target.
+### 2. Authentication: `auth` vs `oauth2`
+Use `auth.require_bearer_token` for simple static token auth (good for local development). Switch to `oauth2` for production to get spec-compliant JWT validation with background JWKS key rotation.
+- `inject_user_header: true` strips the JWT and injects `X-AgentGate-User` and `X-AgentGate-Scopes` into upstream requests so your MCP tools know who is calling without implementing OAuth themselves.
 
-### 3. Supported `upstream` Types
-- `exec:...` → AgentGate becomes a `StdioBridge`, safely spawning underlying child processes, piping networking directly into STDIN buffers.
-- `http://` / `https://` → AgentGate becomes a generic Reverse Proxy, seamlessly flushing your MCP payload against other persistent internet-connected APIs.
+### 3. `mcp_servers` — Upstream Types
+- **`exec:<command>`** → AgentGate spawns the command as a child process and bridges its `stdin`/`stdout` to HTTP. Works with `npx`, `uvx`, `docker run`, or any local binary.
+- **`http://` / `https://`** → AgentGate acts as a reverse proxy to an already-running HTTP MCP server.
 
-### 4. Rate Limiting (`agent_limits` and `policies.rate_limit`)
-If an AI agent gets stuck inside an infinite tool-calling loop, AgentGate implements sliding-window lock logic in memory.
-- **Global `agent_limits`**: Setting `max_requests_per_minute` at the file root enforces a blanket ceiling.
-- **Per-Server `rate_limit`**: Granularly override the global limit for sensitive APIs (e.g. allowing only 10 executions every 60 seconds).
-Any requests breaking these thresholds are returned a polite HTTP `429` effectively telling the LLM to halt and retry natively.
+The `env` block injects key-value pairs into the child process environment (required if your MCP server reads from environment variables, e.g. `GOOGLE_MAPS_API_KEY`).
 
-### 5. Semantic Rules (`parameter_rules`)
-You don't just ban tools; you can parse the JSON parameters inside those tools! 
-If an LLM has access to `read_file`, it generally can read ANY file on the system. By mapping an `argument_key` to a `not_match_regex`, AgentGate intercepts the JSON payload, grabs the `path` string, confirms it against the regex, and blocks it out-right before it reaches the MCP tool natively!
+### 4. `policies.access_mode`
+- `allowlist` — Deny all tools by default; only `allowed_tools` pass through. Recommended for production.
+- `blocklist` — Allow all tools by default; only `blocked_tools` are denied.
+
+### 5. `policies.parameter_rules`
+Inspect the JSON *arguments* of a tool call — not just which tool was called. Map an `argument_key` to a `not_match_regex` to block specific patterns in the parameters:
+
+```yaml
+parameter_rules:
+  execute_query:
+    argument_key: "query"
+    not_match_regex: "DROP|DELETE|TRUNCATE|ALTER"
+    error_msg: "Security Block: Destructive SQL operations are not permitted."
+```
+
+### 6. `policies.human_approval` (HITL)
+Pause execution for high-risk tools and wait for a human decision:
+- `require_for_tools` — List of tool names that require approval.
+- `timeout_seconds` — How long the agent request is held open waiting for a decision. Defaults to 300 seconds.
+- `webhook.type` — `slack`, `discord`, `terminal`, or `generic`.
+- `webhook.url` — The incoming webhook URL for Slack/Discord notifications. Leave empty for `terminal` mode.
+
+### 7. `policies.rate_limit`
+Per-server sliding-window rate limiting:
+- `max_requests` — Maximum calls allowed in the window.
+- `window_seconds` — Length of the sliding window.
+
+The global `agent_limits.max_requests_per_minute` applies across all servers as a blanket ceiling.
+
+---
+
+## Onboarding Flow (No YAML Required)
+
+If you have an existing `claude_desktop_config.json` or `mcp.json` from Claude or Cursor, open `http://127.0.0.1:8081` and paste it into the **Onboarding** tab. AgentGate will:
+1. Perform a transient discovery call to enumerate all tools from each server
+2. Let you configure allowlists, regex parameter rules, and HITL settings per-tool via the UI
+3. Generate and hot-reload the `agentgate.yaml` without restarting the server

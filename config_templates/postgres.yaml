@@ -26,9 +26,9 @@ mcp_servers:
       parameter_rules:
         # Block all mutating SQL — only SELECT allowed without approval
         query:
-          argument: "sql"
-          not_match_regex: "(?i)\\b(DROP|DELETE|TRUNCATE|ALTER|UPDATE|INSERT|CREATE|GRANT|REVOKE)\\b"
-          error_msg: "Security Block: Mutating SQL requires going through Human Approval workflow."
+          - argument: "sql"
+            not_match_regex: "(?i)\\b(DROP|DELETE|TRUNCATE|ALTER|UPDATE|INSERT|CREATE|GRANT|REVOKE)\\b"
+            error_msg: "Security Block: Mutating SQL requires going through Human Approval workflow."
 
       human_approval:
         require_for_tools:
