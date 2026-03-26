@@ -13,6 +13,7 @@
 </div>
 
 ---
+![Screenshot 2026-03-26 at 5 13 58 pm](https://github.com/user-attachments/assets/1567925f-78ca-4c97-9d26-c3065f03ce6c)
 
 
 ## Why AgentGate? (Because Prompt Guardrails Are Not Security)
@@ -237,12 +238,6 @@ The LLM simply waits until an admin clicks **"Approve"** or **"Deny"**.
 ![Screenshot 2026-03-26 at 4 30 48 pm](https://github.com/user-attachments/assets/ad792604-21db-42fe-89cf-de5520a2fce2)
 
 ---
-
-### 6. Observability
-Keep tabs on all incoming and outgoing tools call.
-
-![Screenshot 2026-03-26 at 5 13 58 pm](https://github.com/user-attachments/assets/1567925f-78ca-4c97-9d26-c3065f03ce6c)
-
 
 
 
