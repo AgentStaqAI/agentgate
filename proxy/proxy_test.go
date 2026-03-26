@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"testing"
 
 	"github.com/agentgate/agentgate/config"
@@ -43,21 +42,35 @@ func TestSemanticMiddleware(t *testing.T) {
 				Upstream: upstreamServer.URL,
 				Policies: config.SecurityPolicy{
 					AllowedTools: []string{"safe_tool", "data_tool"},
-					ParameterRules: map[string]config.ParameterRule{
+					ToolPolicies: map[string][]config.ToolPolicy{
 						"safe_tool": {
-							Argument:      "query",
-							NotMatchRegex: "(?i)(DROP|DELETE)",
-							ErrorMsg:      "Blocked Query",
-							CompiledRegex: regexp.MustCompile("(?i)(DROP|DELETE)"),
+							{
+								Action:    "block",
+								Condition: "args.?query.orValue('').matches('(?i)(DROP|DELETE)')",
+								ErrorMsg:  "Blocked Query",
+							},
+							{
+								Action:    "block",
+								Condition: "double(args.?limit.orValue(0.0)) > 100.0",
+								ErrorMsg:  "Limit Exceeded",
+							},
+						},
+						"data_tool": {
+							{
+								Action:    "hitl",
+								Condition: "bool(args.?sensitive.orValue(false)) == true",
+								ErrorMsg:  "HITL triggered",
+							},
 						},
 					},
 				},
 			},
 		},
 	}
+	config.ValidateAndCompile(cfg)
 
 	// Setup Router
-	router := SetupRouter(context.Background(), cfg, nil)
+	router, _ := SetupRouter(context.Background(), cfg, nil)
 	proxyServer := httptest.NewServer(router)
 	defer proxyServer.Close()
 
@@ -92,12 +105,28 @@ func TestSemanticMiddleware(t *testing.T) {
 			expectedBody:   "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32601,\"message\":\"Security Block: Tool not explicitly allowed by AgentGate allowlist.\"}}\n",
 		},
 		{
-			name:           "Regex match blocked",
+			name:           "Regex match blocked via CEL",
 			token:          "secret_token",
 			method:         "safe_tool",
 			params:         map[string]interface{}{"query": "DROP TABLE users"},
 			expectedStatus: http.StatusOK,
-			expectedBody:   "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32602,\"message\":\"Blocked Query\"}}\n",
+			expectedBody:   "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32602,\"message\":\"Blocked Query | Rule: args.?query.orValue('').matches('(?i)(DROP|DELETE)')\"}}\n",
+		},
+		{
+			name:           "CEL numeric limit blocked",
+			token:          "secret_token",
+			method:         "safe_tool",
+			params:         map[string]interface{}{"query": "SELECT *", "limit": 500},
+			expectedStatus: http.StatusOK,
+			expectedBody:   "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32602,\"message\":\"Limit Exceeded | Rule: double(args.?limit.orValue(0.0)) \\u003e 100.0\"}}\n",
+		},
+		{
+			name:           "CEL force HITL fallback to upstream correctly",
+			token:          "secret_token",
+			method:         "data_tool",
+			params:         map[string]interface{}{"sensitive": true},
+			expectedStatus: http.StatusOK,
+			expectedBody:   "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"arguments\":{\"sensitive\":true},\"name\":\"data_tool\"}}",
 		},
 	}
 

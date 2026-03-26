@@ -34,9 +34,9 @@ mcp_servers:
         - "search_files"
       parameter_rules:
         read_file:
-          argument: "path"
-          not_match_regex: "(\\.env|\\.pem|\\.key|\\.ssh/|secrets/|credentials)"
-          error_msg: "Security Block: Reading credential/secret files is not allowed."
+          - argument: "path"
+            not_match_regex: "(\\.env|\\.pem|\\.key|\\.ssh/|secrets/|credentials)"
+            error_msg: "Security Block: Reading credential/secret files is not allowed."
       rate_limit:
         max_requests: 100
         window_seconds: 60
@@ -81,9 +81,9 @@ mcp_servers:
           url: "<YOUR_SLACK_WEBHOOK_URL>"
       parameter_rules:
         create_pull_request:
-          argument: "base"
-          not_match_regex: "^(main|master|production|prod)$"
-          error_msg: "Security Block: Direct PRs to protected branches are not allowed. Target a feature branch."
+          - argument: "base"
+            not_match_regex: "^(main|master|production|prod)$"
+            error_msg: "Security Block: Direct PRs to protected branches are not allowed. Target a feature branch."
       rate_limit:
         max_requests: 20
         window_seconds: 60

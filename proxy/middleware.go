@@ -2,10 +2,10 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -13,6 +13,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/agentgate/agentgate/analytics"
+	"github.com/agentgate/agentgate/auth"
 	"github.com/agentgate/agentgate/config"
 	"github.com/agentgate/agentgate/logger"
 )
@@ -39,13 +41,11 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 		if !cfg.OAuth2.Enabled {
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-				log.Printf("[Middleware] [ERROR] Missing or malformed Authorization header")
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
 			token := strings.TrimPrefix(authHeader, "Bearer ")
 			if token != cfg.Auth.RequireBearerToken {
-				log.Printf("[Middleware] [ERROR] Invalid bearer token")
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
@@ -60,7 +60,6 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 		// ── Step 2: Capture body bytes ───────────────────────────────────────
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
-			log.Printf("[Middleware] [ERROR] Failed to read body: %v", err)
 			http.Error(w, "Bad Request", http.StatusBadRequest)
 			return
 		}
@@ -74,7 +73,6 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 		// ── Step 3: Parse JSON-RPC envelope ─────────────────────────────────
 		var envelope rpcEnvelope
 		if err := json.Unmarshal(bodyBytes, &envelope); err != nil {
-			log.Printf("[Middleware] [ERROR] Invalid JSON-RPC envelope: %v", err)
 			http.Error(w, "Bad Request: Invalid JSON", http.StatusBadRequest)
 			return
 		}
@@ -88,7 +86,6 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 
 		var callReq callToolBody
 		if err := json.Unmarshal(bodyBytes, &callReq); err != nil {
-			log.Printf("[Middleware] [ERROR] Failed to parse CallToolParams: %v", err)
 			writeJSONRPCError(w, envelope.ID, jsonrpc.CodeInvalidRequest, "Invalid tools/call params")
 			return
 		}
@@ -97,7 +94,6 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 
 		// ── Step 4: Global Panic Button ──────────────────────────────────────
 		if IsPaused.Load() {
-			log.Printf("[Middleware] [WARN] AgentGate is PAUSED. Rejecting tool call: %q", toolName)
 			go logger.LogAuditAction(logger.AuditOptions{
 				LogPath:    cfg.AuditLogPath,
 				ServerName: serverName,
@@ -107,6 +103,8 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 				ClientIP:   r.RemoteAddr,
 				DurationMs: time.Since(start).Milliseconds(),
 			})
+			argsMap, _ := callReq.Params.Arguments.(map[string]any)
+			analytics.RecordRequest(serverName, "blocked_panic_button", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, argsMap, "Global Panic Switch Engaged", time.Since(start).Milliseconds())
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			w.Write([]byte(`{"error": "AgentGate is PAUSED. All autonomous actions are suspended."}`))
@@ -117,7 +115,7 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 		// Per-server rate_limit takes precedence over the global agent_limits.
 		maxReqs := cfg.AgentLimits.MaxRequestsPerMinute
 		window := time.Minute
-		if serverConfig.Policies.RateLimit.MaxRequests > 0 {
+		if serverConfig.Policies.RateLimit != nil && serverConfig.Policies.RateLimit.MaxRequests > 0 {
 			maxReqs = serverConfig.Policies.RateLimit.MaxRequests
 			if serverConfig.Policies.RateLimit.WindowSeconds > 0 {
 				window = time.Duration(serverConfig.Policies.RateLimit.WindowSeconds) * time.Second
@@ -125,18 +123,20 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 		}
 		if maxReqs > 0 {
 			if !Allow(serverName, toolName, maxReqs, window) {
-				log.Printf("[Middleware] [WARN] Rate limit exceeded for %s/%s", serverName, toolName)
+				reason := "Rate Limit Exceeded (Infinite Loop Protection)"
 				go logger.LogAuditAction(logger.AuditOptions{
 					LogPath:    cfg.AuditLogPath,
 					ServerName: serverName,
 					ToolName:   toolName,
 					Action:     "BLOCKED",
-					Reason:     "Rate Limit Exceeded (Infinite Loop Protection)",
+					Reason:     reason,
 					ClientIP:   r.RemoteAddr,
 					RequestID:  string(envelope.ID),
 					Arguments:  callReq.Params.Arguments,
 					DurationMs: time.Since(start).Milliseconds(),
 				})
+				analytics.RecordRequest(serverName, "blocked_rate_limit", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, callReq.Params.Arguments.(map[string]any), reason, time.Since(start).Milliseconds())
+
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusTooManyRequests)
 				w.Write([]byte(`{"error": "Rate limit exceeded. Infinite loop protection engaged."}`))
@@ -160,13 +160,14 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 			}
 			if toolBlocked {
 				msg := fmt.Sprintf("Security Block: Tool explicitly blocked by AgentGate blocklist: %q", toolName)
-				log.Printf("[Middleware] [ERROR] RBAC block: %s", msg)
 				go logger.LogAuditAction(logger.AuditOptions{
 					LogPath: cfg.AuditLogPath, ServerName: serverName, ToolName: toolName,
 					Action: "BLOCKED", Reason: "explicit blocklist", ClientIP: r.RemoteAddr,
 					RequestID: string(envelope.ID), Arguments: callReq.Params.Arguments,
 					DurationMs: time.Since(start).Milliseconds(),
 				})
+				argsMap, _ := callReq.Params.Arguments.(map[string]any)
+				analytics.RecordRequest(serverName, "blocked_rbac", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, argsMap, "Explicit blocklist", time.Since(start).Milliseconds())
 				writeJSONRPCError(w, envelope.ID, jsonrpc.CodeMethodNotFound, msg)
 				return
 			}
@@ -180,38 +181,77 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 			}
 			if !toolAllowed {
 				msg := "Security Block: Tool not explicitly allowed by AgentGate allowlist."
-				log.Printf("[Middleware] [ERROR] RBAC block (%q not in allowlist)", toolName)
 				go logger.LogAuditAction(logger.AuditOptions{
 					LogPath: cfg.AuditLogPath, ServerName: serverName, ToolName: toolName,
 					Action: "BLOCKED", Reason: "missing from allowlist", ClientIP: r.RemoteAddr,
 					RequestID: string(envelope.ID), Arguments: callReq.Params.Arguments,
 					DurationMs: time.Since(start).Milliseconds(),
 				})
+				argsMap, _ := callReq.Params.Arguments.(map[string]any)
+				analytics.RecordRequest(serverName, "blocked_rbac", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, argsMap, "Missing from allowlist", time.Since(start).Milliseconds())
 				writeJSONRPCError(w, envelope.ID, jsonrpc.CodeMethodNotFound, msg)
 				return
 			}
 		}
 
-		// ── Step 7: Regex Sandbox — parameter_rules check ───────────────────
-		if rule, exists := serverConfig.Policies.ParameterRules[toolName]; exists && rule.CompiledRegex != nil {
+		// ── Step 7: CEL Policy Engine — tool_policies check ──────────────────
+		if policies, exists := serverConfig.Policies.ToolPolicies[toolName]; exists {
 			args, ok := callReq.Params.Arguments.(map[string]any)
 			if !ok {
 				if rawArgs, err := json.Marshal(callReq.Params.Arguments); err == nil {
 					json.Unmarshal(rawArgs, &args)
 				}
 			}
-			if argVal, hasArg := args[rule.Argument]; hasArg {
-				argStr := fmt.Sprintf("%v", argVal)
-				if rule.CompiledRegex.MatchString(argStr) {
-					log.Printf("[Middleware] [ERROR] Regex sandbox triggered: %s", rule.ErrorMsg)
-					go logger.LogAuditAction(logger.AuditOptions{
-						LogPath: cfg.AuditLogPath, ServerName: serverName, ToolName: toolName,
-						Action: "BLOCKED", Reason: "regex sandbox match", ClientIP: r.RemoteAddr,
-						RequestID: string(envelope.ID), Arguments: callReq.Params.Arguments,
-						DurationMs: time.Since(start).Milliseconds(),
-					})
-					writeJSONRPCError(w, envelope.ID, jsonrpc.CodeInvalidParams, rule.ErrorMsg)
-					return
+
+			// Build the CEL environment payload explicitly mapping variables
+			celPayload := map[string]any{
+				"args": args,
+				"jwt": map[string]any{
+					"sub":    auth.SubFromContext(r.Context()),
+					"scopes": auth.ScopesFromContext(r.Context()),
+				},
+			}
+
+			for _, policy := range policies {
+				if policy.Program == nil {
+					continue
+				}
+
+				out, _, err := policy.Program.Eval(celPayload)
+				if err != nil {
+					// Soft fail eval natively if arguments do not match CEL types
+					continue
+				}
+
+				if match, ok := out.Value().(bool); ok && match {
+					// We hit a triggered rule condition natively!
+					if policy.Action == "block" {
+						errMsg := policy.ErrorMsg
+						if errMsg == "" {
+							errMsg = "Security Block: Request violated CEL policy."
+						}
+
+						go logger.LogAuditAction(logger.AuditOptions{
+							LogPath: cfg.AuditLogPath, ServerName: serverName, ToolName: toolName,
+							Action: "BLOCKED", Reason: "CEL policy match: " + policy.Condition, ClientIP: r.RemoteAddr,
+							RequestID: string(envelope.ID), Arguments: callReq.Params.Arguments,
+							DurationMs: time.Since(start).Milliseconds(),
+						})
+						analytics.RecordRequest(serverName, "blocked_cel", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, args, errMsg, time.Since(start).Milliseconds())
+
+						// In order to provide the structured error detail from the prompt: {"field": "...", "rule": "..."}
+						// We send the standard InvalidParams error string but can inject the explicit rule condition in the message to power visual dashboards.
+						structuredMsg := fmt.Sprintf("%s | Rule: %s", errMsg, policy.Condition)
+						writeJSONRPCError(w, envelope.ID, jsonrpc.CodeInvalidParams, structuredMsg)
+						return
+					} else if policy.Action == "allow" {
+						// Explicit allow - breaks rule chains so subsequent blocks are skipped
+						break
+					} else if policy.Action == "hitl" {
+						// Optionally tag the context to force manual verification in downstream middleware organically
+						ctx := context.WithValue(r.Context(), "force_hitl", true)
+						r = r.WithContext(ctx)
+					}
 				}
 			}
 		}
@@ -224,6 +264,8 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 			RequestID: string(envelope.ID), Arguments: callReq.Params.Arguments,
 			DurationMs: time.Since(start).Milliseconds(),
 		})
+		argsMap, _ := callReq.Params.Arguments.(map[string]any)
+		analytics.RecordRequest(serverName, "allowed", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, argsMap, "Passed Semantic Firewall", time.Since(start).Milliseconds())
 		next.ServeHTTP(w, r)
 	})
 }

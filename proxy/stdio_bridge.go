@@ -18,6 +18,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/agentgate/agentgate/analytics"
 )
 
 const stdioReadTimeout = 30 * time.Second
@@ -46,7 +48,7 @@ func generateSessionID() string {
 }
 
 // NewStdioBridge creates and starts a new StdioBridge process.
-func NewStdioBridge(ctx context.Context, serverName string, cmdString string) (*StdioBridge, error) {
+func NewStdioBridge(ctx context.Context, serverName string, cmdString string, env map[string]string) (*StdioBridge, error) {
 	parts := strings.Fields(cmdString)
 	if len(parts) == 0 {
 		return nil, fmt.Errorf("empty command string")
@@ -97,6 +99,10 @@ func NewStdioBridge(ctx context.Context, serverName string, cmdString string) (*
 		cmd.Env[pathIndex] = cmd.Env[pathIndex] + sep + additions
 	} else {
 		cmd.Env = append(cmd.Env, "PATH="+additions)
+	}
+
+	for k, v := range env {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
 	}
 
 	stdin, err := cmd.StdinPipe()
@@ -158,6 +164,8 @@ func NewStdioBridge(ctx context.Context, serverName string, cmdString string) (*
 			var env rpcEnvelope
 			if err := json.Unmarshal(lineCopy, &env); err == nil && len(env.ID) > 0 {
 				idStr := string(env.ID)
+				analytics.RecordOutput(bridge.serverName, idStr, string(lineCopy))
+
 				bridge.syncRequestsMu.Lock()
 				if ch, ok := bridge.syncRequests[idStr]; ok {
 					ch <- lineCopy
@@ -169,20 +177,14 @@ func NewStdioBridge(ctx context.Context, serverName string, cmdString string) (*
 		if scanErr := scanner.Err(); scanErr != nil {
 			log.Printf("[StdioBridge] stdout scanner error for %s: %v", cmdString, scanErr)
 		}
-		log.Printf("[StdioBridge] stdout scanner goroutine ending for: %s", cmdString)
 	}()
 
 	// Stream stderr line-by-line
 	go func() {
-		log.Printf("[StdioBridge] stderr reader goroutine started for: %s", cmdString)
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			log.Printf("[StdioBridge stderr | %s] %s", cmdString, scanner.Text())
 		}
-		if scanErr := scanner.Err(); scanErr != nil {
-			log.Printf("[StdioBridge] stderr scanner error for %s: %v", cmdString, scanErr)
-		}
-		log.Printf("[StdioBridge] stderr reader goroutine ending for: %s", cmdString)
 	}()
 
 	// Wait goroutine: marks bridge as exited and logs exit status.
@@ -190,13 +192,19 @@ func NewStdioBridge(ctx context.Context, serverName string, cmdString string) (*
 		waitErr := cmd.Wait()
 		bridge.exited.Store(true)
 		if waitErr != nil {
-			log.Printf("[StdioBridge] Process '%s' (PID %d) exited with ERROR: %v", cmdString, cmd.Process.Pid, waitErr)
-		} else {
-			log.Printf("[StdioBridge] Process '%s' (PID %d) exited gracefully", cmdString, cmd.Process.Pid)
+			log.Printf("[StdioBridge] Process %q exited with error: %v", cmdString, waitErr)
 		}
 	}()
 
 	return bridge, nil
+}
+
+// Close gracefully terminates the underlying standard I/O child process natively
+func (s *StdioBridge) Close() error {
+	if s.cmd != nil && s.cmd.Process != nil && !s.exited.Load() {
+		return s.cmd.Process.Kill()
+	}
+	return nil
 }
 
 // ServeHTTP writes the HTTP JSON request payload to the child process Stdin,

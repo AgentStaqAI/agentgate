@@ -2,24 +2,148 @@ package cmd
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sync"
 	"time"
 
+	"github.com/agentgate/agentgate/analytics"
 	"github.com/agentgate/agentgate/auth"
 	"github.com/agentgate/agentgate/config"
 	"github.com/agentgate/agentgate/ipc"
 	"github.com/agentgate/agentgate/proxy"
 	"github.com/kardianos/service"
+	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )
+
+// defaultConfigContent is the auto-generated agentgate.yaml written on first run.
+// Uses distinct default ports (56123/57123) to avoid conflicts with other services.
+const defaultConfigContent = `version: "1.0"
+
+network:
+  proxy_port: 56123   # Main proxy — point your LLM client here
+  admin_port: 57123   # Dashboard — open http://localhost:57123
+
+auth:
+  require_bearer_token: "%s"
+
+audit_log_path: "agentgate_audit.log"
+
+# oauth2:
+#   enabled: false
+#   issuer: "https://auth.example.com"
+#   audience: "agentgate-api"
+#   jwks_url: "https://auth.example.com/.well-known/jwks.json"
+#   resource: "https://agentgate.local/mcp"
+#   scopes_supported:
+#     - "mcp:tools"
+#     - "mcp:resources"
+`
+
+// generateSecureToken creates a 16-byte (32 hex chars) cryptographically secure token
+func generateSecureToken() (string, error) {
+	b := make([]byte, 16)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// bootstrapConfig resolves the config file path, creating a default one if none exists.
+// Priority: explicit -c flag → <cwd>/agentgate.yaml → <binary-dir>/agentgate.yaml → /tmp/agentgate.yaml
+func bootstrapConfig(explicit string, flagChanged bool) string {
+	// User explicitly passed -c — respect it unconditionally
+	if flagChanged {
+		return explicit
+	}
+
+	// Candidate locations to check / create in order of preference
+	var candidates []string
+
+	// 1. Current working directory
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(cwd, "agentgate.yaml"))
+	}
+
+	// 2. Directory containing the agentgate binary (works for brew installs)
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "agentgate.yaml"))
+	}
+
+	// 3. /tmp fallback — guaranteed writable on every platform
+	candidates = append(candidates, filepath.Join(os.TempDir(), "agentgate.yaml"))
+
+	// Deduplicate candidates while preserving order
+	seen := map[string]bool{}
+	var unique []string
+	for _, p := range candidates {
+		if !seen[p] {
+			seen[p] = true
+			unique = append(unique, p)
+		}
+	}
+
+	// Return the first one that already exists
+	for _, path := range unique {
+		if _, err := os.Stat(path); err == nil {
+			log.Printf("[Bootstrap] Found existing config: %s", path)
+			return path
+		}
+	}
+
+	// None found — write the default to the first writable candidate
+	for _, path := range unique {
+		dir := filepath.Dir(path)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			continue
+		}
+
+		token, err := generateSecureToken()
+		if err != nil {
+			log.Printf("[Bootstrap] Failed to generate secure token: %v", err)
+			continue
+		}
+
+		// Replace %s in defaultConfigContent with the generated token
+		content := fmt.Sprintf(defaultConfigContent, token)
+
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			log.Printf("[Bootstrap] Could not write default config to %s: %v", path, err)
+			continue
+		}
+		log.Printf("[Bootstrap] Created default config at %s", path)
+		return path
+	}
+
+	// Last resort: return whatever the flag default was
+	return explicit
+}
 
 type program struct {
 	cfg    *config.Config
 	ctx    context.Context
 	cancel context.CancelFunc
 	srv    *http.Server
+}
+
+// DynamicRouter allows for hot-reloading the underlying HTTP multiplexer locklessly.
+type DynamicRouter struct {
+	mu      sync.RWMutex
+	handler http.Handler
+}
+
+func (r *DynamicRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	r.mu.RLock()
+	h := r.handler
+	r.mu.RUnlock()
+	h.ServeHTTP(w, req)
 }
 
 func (p *program) Start(s service.Service) error {
@@ -31,33 +155,94 @@ func (p *program) run() {
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 
 	// ── OAuth 2.1 JWKS cache ─────────────────────────────────────────────────
-	// When oauth2.enabled=true, fetch the Authorization Server's public keys
-	// for JWT signature verification. The cache refreshes in the background to
-	// handle key rotation transparently.
 	var jwksCache *auth.JWKSCache
 	if p.cfg.OAuth2.Enabled {
 		refreshInterval := time.Duration(p.cfg.OAuth2.RefreshIntervalSeconds) * time.Second
 		if refreshInterval <= 0 {
-			refreshInterval = time.Hour // sensible default
+			refreshInterval = time.Hour
 		}
 		var err error
 		jwksCache, err = auth.NewJWKSCache(p.cfg.OAuth2.JWKSURL, refreshInterval)
 		if err != nil {
 			log.Fatalf("[OAuth2] Failed to initialize JWKS cache: %v", err)
 		}
-		log.Printf("[OAuth2] Resource Server mode enabled (issuer=%s, audience=%s)", p.cfg.OAuth2.Issuer, p.cfg.OAuth2.Audience)
+		log.Printf("[OAuth2] Resource Server mode enabled (issuer=%s)", p.cfg.OAuth2.Issuer)
 	}
 
-	handler := proxy.SetupRouter(p.ctx, p.cfg, jwksCache)
+	// ── Hot-Reload architecture ──────────────────────────────────────────────
+	initHandler, initCleanups := proxy.SetupRouter(p.ctx, p.cfg, jwksCache)
+	var activeCleanups = initCleanups
 
-	addr := fmt.Sprintf(":%d", p.cfg.Network.Port)
+	dynRouter := &DynamicRouter{handler: initHandler}
 
-	// Spin up the background Unix domain socket (or TCP fallback) for IPC Panic commands
+	reloadFunc := func() error {
+		log.Println("[GitOps] Triggering hot-reload of AgentGate policies...")
+		newCfg, err := config.LoadConfig(configPath)
+		if err != nil {
+			return err
+		}
+		newHandler, newCleanups := proxy.SetupRouter(p.ctx, newCfg, jwksCache)
+
+		dynRouter.mu.Lock()
+		p.cfg = newCfg
+		dynRouter.handler = newHandler
+		dynRouter.mu.Unlock()
+
+		for _, cleanup := range activeCleanups {
+			cleanup()
+		}
+		activeCleanups = newCleanups
+
+		log.Println("[GitOps] Hot-reload successfully multiplexed active router.")
+		return nil
+	}
+
+	if err := analytics.InitDB("agentgate.db"); err != nil {
+		log.Printf("[Warning] Failed to initialize analytics DB: %v (Dashboard disabled)", err)
+	} else {
+		getConfig := func() *config.Config {
+			dynRouter.mu.RLock()
+			defer dynRouter.mu.RUnlock()
+			return p.cfg
+		}
+		go analytics.StartAdminServer(p.ctx, getConfig, configPath, reloadFunc)
+	}
+
+	addr := fmt.Sprintf(":%d", p.cfg.Network.ProxyPort)
+
 	ipc.StartServer()
+
+	// If no MCP servers are configured, auto-open the Onboarding UI in the browser
+	if len(p.cfg.MCPServers) == 0 {
+		adminPort := p.cfg.Network.AdminPort
+		if adminPort == 0 {
+			adminPort = 57123
+		}
+		dashboardURL := fmt.Sprintf("http://127.0.0.1:%d", adminPort)
+
+		fmt.Println("")
+		fmt.Println("==================================================")
+		fmt.Println("🚀 AgentGate: First Run Detected")
+		fmt.Println("==================================================")
+		fmt.Println("No agentgate.yaml found. Starting in Onboarding Mode.")
+		fmt.Println("")
+		fmt.Println("To configure your MCP firewalls, open the dashboard:")
+		fmt.Printf("👉 %s\n", dashboardURL)
+		fmt.Println("")
+		fmt.Println("If running on a remote server, use an SSH tunnel:")
+		fmt.Printf("   ssh -L %d:localhost:%d user@your-server-ip\n", adminPort, adminPort)
+		fmt.Println("==================================================")
+		fmt.Println("")
+
+		go func() {
+			time.Sleep(1 * time.Second)
+			_ = browser.OpenURL(dashboardURL)
+		}()
+	}
 
 	p.srv = &http.Server{
 		Addr:    addr,
-		Handler: handler,
+		Handler: dynRouter,
 	}
 
 	log.Printf("AgentGate listening on %s", addr)
@@ -71,7 +256,6 @@ func (p *program) Stop(s service.Service) error {
 	if p.cancel != nil {
 		p.cancel()
 	}
-
 	if p.srv != nil {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
@@ -87,6 +271,10 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Starts the AgentGate semantic firewall reverse proxy server",
 	Run: func(cmd *cobra.Command, args []string) {
+		// Auto-bootstrap: resolve or auto-create config for zero-YAML first-run.
+		flagChanged := cmd.Flags().Changed("config")
+		configPath = bootstrapConfig(configPath, flagChanged)
+
 		cfg, err := config.LoadConfig(configPath)
 		if err != nil {
 			log.Fatalf("Failed to load config from %s: %v", configPath, err)
@@ -94,8 +282,8 @@ var serveCmd = &cobra.Command{
 
 		if !service.Interactive() {
 			for name, srv := range cfg.MCPServers {
-				if srv.Policies.HumanApproval.Webhook.Type == "terminal" {
-					log.Printf("⚠️ WARNING: 'terminal' HITL mode is configured for %s, but AgentGate is running as a background service. Terminal approvals will be automatically rejected.", name)
+				if srv.Policies.HumanApproval != nil && srv.Policies.HumanApproval.Webhook != nil && srv.Policies.HumanApproval.Webhook.Type == "terminal" {
+					log.Printf("WARNING: 'terminal' HITL mode is configured for %s, but AgentGate is running as a background service. Terminal approvals will be automatically rejected.", name)
 				}
 			}
 		}

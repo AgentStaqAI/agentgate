@@ -18,3 +18,7 @@ vendor/
 agentgate.yaml
 .env
 chinook.db
+agentgate_bkp.yaml
+**/.DS_Store
+./analytics/agentgate.db
+agentgate.db
