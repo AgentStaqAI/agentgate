@@ -87,9 +87,9 @@ type StdioTransport struct {
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
 	ctx    context.Context
-	
-	queue chan []byte
-	errCh chan error
+
+	queue     chan []byte
+	errCh     chan error
 	stderrBuf *bytes.Buffer
 	stderrMu  sync.Mutex
 }
@@ -97,7 +97,7 @@ type StdioTransport struct {
 func (t *StdioTransport) Connect(ctx context.Context) error {
 	t.ctx = ctx
 	t.cmd = exec.CommandContext(ctx, t.Command, t.Args...)
-	
+
 	t.cmd.Env = os.Environ()
 	for k, v := range t.Env {
 		t.cmd.Env = append(t.cmd.Env, fmt.Sprintf("%s=%s", k, v))
@@ -182,13 +182,13 @@ func (t *StdioTransport) getStderr() string {
 
 func (t *StdioTransport) Receive(ctx context.Context) ([]byte, error) {
 	select {
-	case <-ctx.Done():    // Short-circuited scoped fallback context
+	case <-ctx.Done(): // Short-circuited scoped fallback context
 		stderr := t.getStderr()
 		if stderr != "" {
 			return nil, fmt.Errorf("%w. Last Stderr: %s", ctx.Err(), stderr)
 		}
 		return nil, ctx.Err()
-	case <-t.ctx.Done():  // Global connection died
+	case <-t.ctx.Done(): // Global connection died
 		stderr := t.getStderr()
 		if stderr != "" {
 			return nil, fmt.Errorf("%w. Last Stderr: %s", t.ctx.Err(), stderr)
@@ -238,7 +238,7 @@ func (t *HTTPTransport) Send(req []byte) error {
 	if err != nil {
 		return err
 	}
-	
+
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json, text/event-stream")
 	if t.SessionID != "" {

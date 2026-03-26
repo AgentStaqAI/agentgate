@@ -2,10 +2,10 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -41,13 +41,11 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 		if !cfg.OAuth2.Enabled {
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-				log.Printf("[Middleware] [ERROR] Missing or malformed Authorization header")
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
 			token := strings.TrimPrefix(authHeader, "Bearer ")
 			if token != cfg.Auth.RequireBearerToken {
-				log.Printf("[Middleware] [ERROR] Invalid bearer token")
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
@@ -62,7 +60,6 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 		// ── Step 2: Capture body bytes ───────────────────────────────────────
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
-			log.Printf("[Middleware] [ERROR] Failed to read body: %v", err)
 			http.Error(w, "Bad Request", http.StatusBadRequest)
 			return
 		}
@@ -76,7 +73,6 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 		// ── Step 3: Parse JSON-RPC envelope ─────────────────────────────────
 		var envelope rpcEnvelope
 		if err := json.Unmarshal(bodyBytes, &envelope); err != nil {
-			log.Printf("[Middleware] [ERROR] Invalid JSON-RPC envelope: %v", err)
 			http.Error(w, "Bad Request: Invalid JSON", http.StatusBadRequest)
 			return
 		}
@@ -90,7 +86,6 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 
 		var callReq callToolBody
 		if err := json.Unmarshal(bodyBytes, &callReq); err != nil {
-			log.Printf("[Middleware] [ERROR] Failed to parse CallToolParams: %v", err)
 			writeJSONRPCError(w, envelope.ID, jsonrpc.CodeInvalidRequest, "Invalid tools/call params")
 			return
 		}
@@ -99,7 +94,6 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 
 		// ── Step 4: Global Panic Button ──────────────────────────────────────
 		if IsPaused.Load() {
-			log.Printf("[Middleware] [WARN] AgentGate is PAUSED. Rejecting tool call: %q", toolName)
 			go logger.LogAuditAction(logger.AuditOptions{
 				LogPath:    cfg.AuditLogPath,
 				ServerName: serverName,
@@ -129,7 +123,6 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 		}
 		if maxReqs > 0 {
 			if !Allow(serverName, toolName, maxReqs, window) {
-				log.Printf("[Middleware] [WARN] Rate limit exceeded for %s/%s", serverName, toolName)
 				reason := "Rate Limit Exceeded (Infinite Loop Protection)"
 				go logger.LogAuditAction(logger.AuditOptions{
 					LogPath:    cfg.AuditLogPath,
@@ -167,7 +160,6 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 			}
 			if toolBlocked {
 				msg := fmt.Sprintf("Security Block: Tool explicitly blocked by AgentGate blocklist: %q", toolName)
-				log.Printf("[Middleware] [ERROR] RBAC block: %s", msg)
 				go logger.LogAuditAction(logger.AuditOptions{
 					LogPath: cfg.AuditLogPath, ServerName: serverName, ToolName: toolName,
 					Action: "BLOCKED", Reason: "explicit blocklist", ClientIP: r.RemoteAddr,
@@ -189,7 +181,6 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 			}
 			if !toolAllowed {
 				msg := "Security Block: Tool not explicitly allowed by AgentGate allowlist."
-				log.Printf("[Middleware] [ERROR] RBAC block (%q not in allowlist)", toolName)
 				go logger.LogAuditAction(logger.AuditOptions{
 					LogPath: cfg.AuditLogPath, ServerName: serverName, ToolName: toolName,
 					Action: "BLOCKED", Reason: "missing from allowlist", ClientIP: r.RemoteAddr,
@@ -203,8 +194,8 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 			}
 		}
 
-		// ── Step 7: Regex Sandbox — parameter_rules check ───────────────────
-		if rules, exists := serverConfig.Policies.ParameterRules[toolName]; exists {
+		// ── Step 7: CEL Policy Engine — tool_policies check ──────────────────
+		if policies, exists := serverConfig.Policies.ToolPolicies[toolName]; exists {
 			args, ok := callReq.Params.Arguments.(map[string]any)
 			if !ok {
 				if rawArgs, err := json.Marshal(callReq.Params.Arguments); err == nil {
@@ -212,27 +203,54 @@ func SemanticMiddleware(cfg *config.Config, serverName string, serverConfig conf
 				}
 			}
 
-			for _, rule := range rules {
-				if rule.CompiledRegex == nil {
+			// Build the CEL environment payload explicitly mapping variables
+			celPayload := map[string]any{
+				"args": args,
+				"jwt": map[string]any{
+					"sub":    auth.SubFromContext(r.Context()),
+					"scopes": auth.ScopesFromContext(r.Context()),
+				},
+			}
+
+			for _, policy := range policies {
+				if policy.Program == nil {
 					continue
 				}
-				if argVal, hasArg := args[rule.Argument]; hasArg {
-					argStr := fmt.Sprintf("%v", argVal)
-					if rule.CompiledRegex.MatchString(argStr) {
-						errMsg := rule.ErrorMsg
+
+				out, _, err := policy.Program.Eval(celPayload)
+				if err != nil {
+					// Soft fail eval natively if arguments do not match CEL types
+					continue
+				}
+
+				if match, ok := out.Value().(bool); ok && match {
+					// We hit a triggered rule condition natively!
+					if policy.Action == "block" {
+						errMsg := policy.ErrorMsg
 						if errMsg == "" {
-							errMsg = fmt.Sprintf("Security Block: Argument %q violates regex policy.", rule.Argument)
+							errMsg = "Security Block: Request violated CEL policy."
 						}
-						log.Printf("[Middleware] [ERROR] Regex sandbox triggered for argument %q: %s", rule.Argument, errMsg)
+
 						go logger.LogAuditAction(logger.AuditOptions{
 							LogPath: cfg.AuditLogPath, ServerName: serverName, ToolName: toolName,
-							Action: "BLOCKED", Reason: "regex sandbox match", ClientIP: r.RemoteAddr,
+							Action: "BLOCKED", Reason: "CEL policy match: " + policy.Condition, ClientIP: r.RemoteAddr,
 							RequestID: string(envelope.ID), Arguments: callReq.Params.Arguments,
 							DurationMs: time.Since(start).Milliseconds(),
 						})
-						analytics.RecordRequest(serverName, "blocked_regex", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, args, errMsg, time.Since(start).Milliseconds())
-						writeJSONRPCError(w, envelope.ID, jsonrpc.CodeInvalidParams, errMsg)
+						analytics.RecordRequest(serverName, "blocked_cel", auth.SubFromContext(r.Context()), string(envelope.ID), string(bodyBytes), toolName, args, errMsg, time.Since(start).Milliseconds())
+
+						// In order to provide the structured error detail from the prompt: {"field": "...", "rule": "..."}
+						// We send the standard InvalidParams error string but can inject the explicit rule condition in the message to power visual dashboards.
+						structuredMsg := fmt.Sprintf("%s | Rule: %s", errMsg, policy.Condition)
+						writeJSONRPCError(w, envelope.ID, jsonrpc.CodeInvalidParams, structuredMsg)
 						return
+					} else if policy.Action == "allow" {
+						// Explicit allow - breaks rule chains so subsequent blocks are skipped
+						break
+					} else if policy.Action == "hitl" {
+						// Optionally tag the context to force manual verification in downstream middleware organically
+						ctx := context.WithValue(r.Context(), "force_hitl", true)
+						r = r.WithContext(ctx)
 					}
 				}
 			}

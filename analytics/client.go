@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 )
 
@@ -30,7 +29,6 @@ func (c *MCPClient) Discover(ctx context.Context) ([]MCPTool, error) {
 
 	// STEP 1: Initialize
 	initReq := []byte(`{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "AgentGate", "version": "1.0.0"}}}`)
-	log.Printf("[MCPClient] Sending Initialize: %s", string(initReq))
 	if err := c.transport.Send(initReq); err != nil {
 		return nil, fmt.Errorf("initialize send failed: %w", err)
 	}
@@ -40,20 +38,17 @@ func (c *MCPClient) Discover(ctx context.Context) ([]MCPTool, error) {
 	var lastErr error
 	for i := 0; i < 10; i++ { // Try reading up to 10 messages safely without hanging
 		raw, err := c.transport.Receive(ctx)
-		
+
 		if err != nil {
-			log.Printf("[MCPClient] Initialize Receive Error: %v", err)
 			lastErr = err
 			break
 		}
-		log.Printf("[MCPClient] Initialize Received Raw: %s", string(raw))
-		
+
 		resp, err := parseTolerantResponse(raw)
 		if err != nil {
-			log.Printf("[MCPClient] Initialize Parse Error (Ignoring): %v", err)
 			continue // Ignore garbage preamble prints
 		}
-		
+
 		if resp.ID != nil {
 			idVal := fmt.Sprintf("%v", resp.ID)
 			if idVal == "1" || idVal == "1.0" {
@@ -65,7 +60,7 @@ func (c *MCPClient) Discover(ctx context.Context) ([]MCPTool, error) {
 				} else if sess, ok := resp.Result["sessionId"].(string); ok {
 					c.SessionID = sess
 				}
-				
+
 				// Ensure HTTP transport picks it up for subsequent stateful loops
 				if httpT, ok := c.transport.(*HTTPTransport); ok {
 					if httpT.SessionID == "" {
@@ -87,7 +82,6 @@ func (c *MCPClient) Discover(ctx context.Context) ([]MCPTool, error) {
 
 	// STEP 3: Initialized Notification
 	notifyReq := []byte(`{"jsonrpc": "2.0", "method": "notifications/initialized"}`)
-	log.Printf("[MCPClient] Sending Initialized Notification: %s", string(notifyReq))
 	if err := c.transport.Send(notifyReq); err != nil {
 		// Just a notification broadcast, ignore send errors natively
 	}
@@ -108,38 +102,32 @@ func (c *MCPClient) Discover(ctx context.Context) ([]MCPTool, error) {
 	var toolsFound []MCPTool
 
 	for _, v := range variants {
-		log.Printf("[MCPClient] Sending Tools Request Variant (ID: %d): %s", v.ID, v.Req)
 		if err := c.transport.Send([]byte(v.Req)); err != nil {
-			log.Printf("[MCPClient] Sending Variant Failed: %v", err)
 			continue
 		}
-		
-		// Attempt to receive for this fallback variant
+
 		var innerBreak bool
 		var matchedVariant bool
-		
+
 		for j := 0; j < 5; j++ {
-			receiveCtx, cancel := context.WithTimeout(ctx, 3*time.Second) // Force 3-second rapid discard
+			receiveCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			raw, err := c.transport.Receive(receiveCtx)
 			cancel()
-			
+
 			if err != nil {
-				log.Printf("[MCPClient] Tools Request Receive Error: %v", err)
 				innerBreak = true
 				break
 			}
-			log.Printf("[MCPClient] Tools Request Received Raw: %s", string(raw))
-			
+
 			resp, err := parseTolerantResponse(raw)
 			if err != nil {
-				log.Printf("[MCPClient] Tools Request Parse Error (Ignoring): %v", err)
 				continue
 			}
-			
+
 			if resp.ID != nil {
 				idVal := fmt.Sprintf("%v", resp.ID)
 				expectedID := fmt.Sprintf("%d", v.ID)
-				
+
 				if idVal == expectedID || idVal == expectedID+".0" {
 					matchedVariant = true
 					if len(resp.Result) > 0 {
@@ -155,11 +143,11 @@ func (c *MCPClient) Discover(ctx context.Context) ([]MCPTool, error) {
 				}
 			}
 		}
-		
+
 		if matchedVariant || innerBreak {
 			continue
 		}
 	}
-	
+
 	return nil, fmt.Errorf("failed to discover tools across all fallback variants")
 }

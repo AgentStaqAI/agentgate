@@ -83,21 +83,21 @@ func RecordRequest(serverName, status, agentID, jsonrpcID, inputPayload, toolNam
 		}
 
 		id, _ := res.LastInsertId()
-		
+
 		record := RequestRecord{
-			ID:            id,
-			Timestamp:     time.Now().UTC().Format(time.RFC3339),
-			Status:        status,
-			ServerName:    serverName,
-			AgentID:       agentID,
-			ToolName:      toolName,
-			Arguments:     args,
-			Reason:        reason,
-			LatencyMs:     latencyMs,
-			JSONRPCID:     jsonrpcID,
-			InputPayload:  inputPayload,
+			ID:           id,
+			Timestamp:    time.Now().UTC().Format(time.RFC3339),
+			Status:       status,
+			ServerName:   serverName,
+			AgentID:      agentID,
+			ToolName:     toolName,
+			Arguments:    args,
+			Reason:       reason,
+			LatencyMs:    latencyMs,
+			JSONRPCID:    jsonrpcID,
+			InputPayload: inputPayload,
 		}
-		
+
 		// Push to the in-memory SSE channels
 		Broadcast(record)
 	}()

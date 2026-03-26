@@ -11,8 +11,8 @@ version: "1.0"
 
 # ── Network ───────────────────────────────────────────────────────────────────
 network:
-  port: 8083           # Main proxy port (where your LLM clients connect)
-  admin_port: 8081     # Embedded dashboard & admin API
+  proxy_port: 56123    # Main proxy port (where your LLM clients connect)
+  admin_port: 57123    # Embedded dashboard & admin API
   public_url: "https://your-ngrok-url.ngrok-free.dev"  # Required for HITL callback URLs
 
 # ── Authentication ─────────────────────────────────────────────────────────────
@@ -24,10 +24,9 @@ auth:
 oauth2:
   enabled: true
   issuer: "https://auth.example.com"
-  audience: "agentgate-production"
+  scopes_supported: ["mcp-tools"]
+  resource: "http://localhost:56123"
   jwks_url: "https://auth.example.com/.well-known/jwks.json"
-  resource_metadata: "https://auth.example.com/.well-known/oauth-authorization-server"
-  refresh_interval_seconds: 3600
   inject_user_header: true   # Injects X-AgentGate-User and X-AgentGate-Scopes upstream
 
 # ── Global Limits ──────────────────────────────────────────────────────────────
@@ -49,12 +48,11 @@ mcp_servers:
       allowed_tools:
         - read_file
         - list_directory
-      parameter_rules:
+      tool_policies:
         read_file:
-          argument_key: "path"
-          not_match_regex: "\\.ssh/|/etc/shadow"
-          error_msg: "Security Block: Access to sensitive paths is denied."
-      rate_limit:
+          - action: block
+            condition: args.path.contains(".ssh") || args.path.contains("/etc/shadow")
+            error_msg: "Security Block: Access to sensitive paths is denied."
         max_requests: 60
         window_seconds: 60
 
@@ -66,9 +64,9 @@ mcp_servers:
       allowed_tools:
         - execute_query
       human_approval:
-        require_for_tools:
+        tools:
           - execute_query
-        timeout_seconds: 300      # Default: 300 seconds. Agent request is held open until approval.
+        timeout: 300              # Default: 300 seconds. Agent request is held open until approval.
         webhook:
           type: "slack"           # Options: "slack", "discord", "terminal", "generic"
           url: "https://hooks.slack.com/services/T.../B.../..."
@@ -90,7 +88,7 @@ mcp_servers:
 ## Key Configuration Fields
 
 ### 1. `network`
-- `port` — The main proxy port. Your AI client connects here.
+- `proxy_port` — The main proxy port. Your AI client connects here.
 - `admin_port` — The embedded observability dashboard and admin API.
 - `public_url` — Publicly reachable base URL. Required so AgentGate can build correct HITL callback URLs for Slack/Discord buttons to reach back.
 
@@ -108,21 +106,24 @@ The `env` block injects key-value pairs into the child process environment (requ
 - `allowlist` — Deny all tools by default; only `allowed_tools` pass through. Recommended for production.
 - `blocklist` — Allow all tools by default; only `blocked_tools` are denied.
 
-### 5. `policies.parameter_rules`
-Inspect the JSON *arguments* of a tool call — not just which tool was called. Map an `argument_key` to a `not_match_regex` to block specific patterns in the parameters:
+### 5. `policies.tool_policies` (CEL Rules)
+Inspect the JSON *arguments* of a tool call or the *JWT claims* using Google's Common Expression Language (CEL). You can map an action (`block`, `allow`, `hitl`) to a specific condition:
 
 ```yaml
-parameter_rules:
+tool_policies:
   execute_query:
-    argument_key: "query"
-    not_match_regex: "DROP|DELETE|TRUNCATE|ALTER"
-    error_msg: "Security Block: Destructive SQL operations are not permitted."
+    - action: block
+      condition: args.query.contains("DROP") || args.query.contains("DELETE")
+      error_msg: "Security Block: Destructive SQL operations are not permitted."
+    - action: hitl
+      condition: jwt.claims.role == "developer" && args.query.contains("UPDATE")
+      error_msg: "Updates require Human-in-the-Loop authorization."
 ```
 
 ### 6. `policies.human_approval` (HITL)
 Pause execution for high-risk tools and wait for a human decision:
-- `require_for_tools` — List of tool names that require approval.
-- `timeout_seconds` — How long the agent request is held open waiting for a decision. Defaults to 300 seconds.
+- `tools` — List of tool names that require approval natively.
+- `timeout` — How long the agent request is held open waiting for a decision. Defaults to 300 seconds.
 - `webhook.type` — `slack`, `discord`, `terminal`, or `generic`.
 - `webhook.url` — The incoming webhook URL for Slack/Discord notifications. Leave empty for `terminal` mode.
 

@@ -26,6 +26,7 @@
                 background-color: transparent;
             }
         }
+
         /* Glassmorphism Classes */
         .glass {
             background: rgba(17, 24, 39, 0.7);
@@ -43,10 +44,19 @@
 
         /* Status Pulse Animation */
         @keyframes pulse-glow {
-            0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
-            70% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+            0% {
+                box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+            }
+
+            70% {
+                box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+            }
         }
+
         .status-pulse {
             animation: pulse-glow 2s infinite;
         }
@@ -119,7 +129,8 @@
                     <span :class="connected ? 'bg-green-500 status-pulse' : 'bg-red-500'"
                         class="relative inline-flex rounded-full h-2 w-2"></span>
                 </span>
-                <span x-text="connected ? 'SSE Connected' : 'Disconnected'" class="text-gray-500 text-xs font-medium uppercase tracking-wider"></span>
+                <span x-text="connected ? 'Connected' : 'Disconnected'"
+                    class="text-gray-500 text-xs font-medium uppercase tracking-wider"></span>
             </div>
         </div>
     </aside>
@@ -128,14 +139,17 @@
     <header class="md:hidden glass-header p-4 shrink-0" x-data="{ menuOpen: false }">
         <div class="flex justify-between items-center">
             <div class="flex items-center space-x-3">
-                <div class="w-7 h-7 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
+                <div
+                    class="w-7 h-7 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
                     <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                             d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z">
                         </path>
                     </svg>
                 </div>
-                <h1 class="text-lg font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">AgentGate</h1>
+                <h1
+                    class="text-lg font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">
+                    AgentGate</h1>
             </div>
             <button @click="menuOpen = !menuOpen" class="text-gray-400 hover:text-white focus:outline-none">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -158,7 +172,8 @@
     </header>
 
     <!-- Main Content Area -->
-    <main class="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto bg-[#0a0c10] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-900/5 via-[#0a0c10] to-[#0a0c10]">
+    <main
+        class="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto bg-[#0a0c10] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-900/5 via-[#0a0c10] to-[#0a0c10]">
 
         <!-- ======================= DASHBOARD TAB ======================= -->
         <div x-show="view === 'dashboard'" class="space-y-8" x-transition.opacity>
@@ -417,7 +432,7 @@
 
                         <!-- HITL -->
                         <div
-                            x-show="(serverCfg.Policies?.human_approval?.require_for_tools || serverCfg.Policies?.HumanApproval?.RequireForTools)?.length > 0">
+                            x-show="(serverCfg.Policies?.human_approval?.tools || serverCfg.Policies?.HumanApproval?.Tools)?.length > 0">
                             <h4
                                 class="text-xs uppercase tracking-widest font-semibold text-yellow-400 mb-3 flex items-center">
                                 <span
@@ -426,7 +441,7 @@
                             </h4>
                             <div class="flex flex-wrap gap-2">
                                 <template
-                                    x-for="tool in ((serverCfg.Policies?.human_approval?.require_for_tools || serverCfg.Policies?.HumanApproval?.RequireForTools) || [])">
+                                    x-for="tool in ((serverCfg.Policies?.human_approval?.tools || serverCfg.Policies?.HumanApproval?.Tools) || [])">
                                     <span
                                         class="px-3 py-1.5 bg-yellow-900/20 border border-yellow-800/50 text-yellow-300 rounded-md text-sm font-mono shadow-sm transition hover:bg-yellow-900/40 flex items-center">
                                         <svg class="w-3 h-3 mr-1.5" fill="currentColor" viewBox="0 0 20 20">
@@ -538,23 +553,43 @@
                                         </div>
                                     </div>
 
-                                    <!-- Sandbox configuration shown if tool is allowed -->
+                                    <!-- Visual Policy Builder -->
                                     <div x-show="onboardForms[serverName].tools[tool.name]?.allowed" x-transition
                                         class="mt-4 pt-4 border-t border-gray-800/50 space-y-4">
-                                        <!-- HITL Configuration -->
-                                        <div class="space-y-3">
-                                            <div class="flex items-center">
-                                                <input type="checkbox" :id="'hitl_'+serverName+'_'+tool.name"
-                                                    x-model="onboardForms[serverName].tools[tool.name].hitl"
-                                                    class="w-4 h-4 text-yellow-500 bg-gray-900 border-gray-700 rounded focus:ring-yellow-600 focus:ring-2">
-                                                <label :for="'hitl_'+serverName+'_'+tool.name"
-                                                    class="ml-2 text-sm font-medium text-yellow-400">Require Human
-                                                    Approval
-                                                    (HITL) before execution — defaults to 300s timeout</label>
+                                        <div class="bg-gray-900/50 p-4 rounded-lg border border-gray-800"
+                                            x-show="Object.keys(tool.inputSchema?.properties || {}).length > 0">
+                                            <div class="flex items-center justify-between mb-4">
+                                                <label
+                                                    class="block text-xs font-bold text-purple-400 uppercase tracking-widest flex items-center">
+                                                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor"
+                                                        viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                                            stroke-width="2"
+                                                            d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z">
+                                                        </path>
+                                                    </svg>
+                                                    Visual Policy Builder
+                                                </label>
                                             </div>
-                                            <!-- HITL Webhook Config (shown when HITL is enabled) -->
-                                            <div x-show="onboardForms[serverName].tools[tool.name].hitl" x-transition
-                                                class="ml-6 mt-2 p-4 bg-yellow-950/20 border border-yellow-900/40 rounded-lg space-y-3">
+
+                                            <!-- Action Selector -->
+                                            <div
+                                                class="flex items-center space-x-3 mb-5 p-3 bg-gray-950 rounded-lg border border-gray-800/60">
+                                                <span
+                                                    class="text-xs font-medium text-gray-400 uppercase tracking-wide">Action
+                                                    to take if conditions are met:</span>
+                                                <select x-model="onboardForms[serverName].tools[tool.name].policyAction"
+                                                    class="bg-gray-900 border border-gray-700 text-gray-200 text-sm font-medium rounded-lg px-3 py-1.5 outline-none focus:ring-purple-500 focus:border-purple-500">
+                                                    <option value="block">Block Execution</option>
+                                                    <option value="allow">Force Allow</option>
+                                                    <option value="hitl">Notify Human (HITL)</option>
+                                                </select>
+                                            </div>
+
+                                            <!-- HITL Extra Config -->
+                                            <div x-show="onboardForms[serverName].tools[tool.name].policyAction === 'hitl'"
+                                                x-transition
+                                                class="mb-5 p-4 bg-yellow-950/20 border border-yellow-900/40 rounded-lg space-y-3">
                                                 <div class="grid grid-cols-3 gap-3">
                                                     <div>
                                                         <label
@@ -572,10 +607,8 @@
                                                     <div class="col-span-2">
                                                         <label
                                                             class="block text-xs text-yellow-300 font-semibold mb-1">Webhook
-                                                            URL
-                                                            <span class="text-gray-500 font-normal ml-1">(leave blank
-                                                                for terminal)</span>
-                                                        </label>
+                                                            URL <span class="text-gray-500 font-normal ml-1">(leave
+                                                                blank for terminal)</span></label>
                                                         <input type="url"
                                                             x-model="onboardForms[serverName].tools[tool.name].hitlWebhook"
                                                             placeholder="https://hooks.slack.com/services/..."
@@ -583,37 +616,96 @@
                                                     </div>
                                                 </div>
                                             </div>
-                                        </div>
 
-                                        <div class="bg-gray-900/50 p-3 rounded-lg border border-gray-800"
-                                            x-show="Object.keys(tool.inputSchema?.properties || {}).length > 0">
-                                            <label
-                                                class="block text-xs font-semibold text-purple-400 uppercase tracking-widest mb-3">Regex
-                                                Parameter Blocklist (Optional)</label>
-                                            <div class="space-y-3">
+                                            <!-- CEL Rows -->
+                                            <div class="space-y-2.5">
                                                 <template
-                                                    x-for="[propKey, propVal] in Object.entries(tool.inputSchema?.properties || {})"
-                                                    :key="propKey">
-                                                    <div class="flex items-center space-x-3">
-                                                        <div class="w-1/3">
-                                                            <div class="text-xs font-mono text-gray-300 font-bold"
-                                                                x-text="propKey"></div>
-                                                            <div class="text-[10px] text-gray-500 truncate mt-0.5"
-                                                                x-text="propVal.description || propVal.type || 'string'">
-                                                            </div>
-                                                        </div>
-                                                        <div class="flex-1">
-                                                            <input type="text"
-                                                                x-model="onboardForms[serverName].tools[tool.name].regexMap[propKey]"
-                                                                :placeholder="'BLOCK MATCH regex e.g. (?i)DROP'"
-                                                                class="bg-gray-950 border border-gray-800 text-gray-300 text-xs rounded-lg focus:ring-purple-500 focus:border-purple-500 block w-full p-2 outline-none font-mono">
-                                                        </div>
+                                                    x-for="(row, idx) in onboardForms[serverName].tools[tool.name].policyRows"
+                                                    :key="idx">
+                                                    <div
+                                                        class="flex items-center space-x-2 bg-gray-800/40 p-2.5 rounded-lg border border-gray-700 shadow-sm">
+                                                        <select x-model="row.connector" x-show="idx > 0"
+                                                            class="bg-gray-900 border border-gray-600 text-xs font-bold text-blue-400 px-2 py-1.5 rounded outline-none w-20 cursor-pointer">
+                                                            <option value="AND">AND</option>
+                                                            <option value="OR">OR</option>
+                                                        </select>
+                                                        <span x-show="idx === 0"
+                                                            class="text-xs font-black text-gray-500 w-20 text-center uppercase tracking-widest pl-2">IF</span>
+
+                                                        <select x-model="row.field"
+                                                            @change="row.type = tool.inputSchema?.properties[row.field]?.type || 'string'"
+                                                            class="bg-gray-900 border border-gray-600 text-xs font-mono text-gray-200 p-2 rounded flex-1 outline-none focus:border-blue-500 cursor-pointer">
+                                                            <option value="" disabled>Select Field...</option>
+                                                            <template
+                                                                x-for="[pKey, pVal] in Object.entries(tool.inputSchema?.properties || {})"
+                                                                :key="pKey">
+                                                                <option :value="pKey" x-text="pKey"></option>
+                                                            </template>
+                                                        </select>
+
+                                                        <select x-model="row.operator"
+                                                            class="bg-gray-900 border border-gray-600 text-xs font-mono text-purple-300 p-2 rounded w-40 outline-none focus:border-purple-500 cursor-pointer text-center">
+                                                            <template x-if="row.type === 'string' || !row.type">
+                                                                <optgroup label="String Operators">
+                                                                    <option value="EQUALS">Equals</option>
+                                                                    <option value="CONTAINS">Contains</option>
+                                                                    <option value="STARTS_WITH">Starts With</option>
+                                                                    <option value="ENDS_WITH">Ends With</option>
+                                                                    <option value="MATCHES">Regex Match</option>
+                                                                </optgroup>
+                                                            </template>
+                                                            <template
+                                                                x-if="row.type === 'number' || row.type === 'integer'">
+                                                                <optgroup label="Numeric Operators">
+                                                                    <option value="EQUALS">==</option>
+                                                                    <option value="NOT_EQUALS">!=</option>
+                                                                    <option value="GREATER_THAN">&gt;</option>
+                                                                    <option value="LESS_THAN">&lt;</option>
+                                                                    <option value="GREATER_EQUAL">&gt;=</option>
+                                                                    <option value="LESS_EQUAL">&lt;=</option>
+                                                                </optgroup>
+                                                            </template>
+                                                            <template x-if="row.type === 'boolean'">
+                                                                <optgroup label="Boolean Operators">
+                                                                    <option value="IS_TRUE">Is True</option>
+                                                                    <option value="IS_FALSE">Is False</option>
+                                                                </optgroup>
+                                                            </template>
+                                                        </select>
+
+                                                        <template x-if="row.type !== 'boolean'">
+                                                            <input
+                                                                :type="(row.type==='number'||row.type==='integer')?'number':'text'"
+                                                                x-model="row.value"
+                                                                class="bg-gray-950 border border-gray-600 text-xs font-mono text-green-300 p-2 rounded flex-1 placeholder-gray-600 outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                                                                placeholder="Value...">
+                                                        </template>
+
+                                                        <button
+                                                            @click="onboardForms[serverName].tools[tool.name].policyRows.splice(idx, 1)"
+                                                            class="text-red-500 hover:text-red-400 hover:bg-red-950/50 p-1.5 rounded transition">
+                                                            <svg class="w-4 h-4" fill="none" stroke="currentColor"
+                                                                viewBox="0 0 24 24">
+                                                                <path stroke-linecap="round" stroke-linejoin="round"
+                                                                    stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                                            </svg>
+                                                        </button>
                                                     </div>
                                                 </template>
+
+                                                <button
+                                                    @click="let pProps=Object.keys(tool.inputSchema?.properties||{}); onboardForms[serverName].tools[tool.name].policyRows.push({ field: pProps[0]||'', operator: 'EQUALS', type: tool.inputSchema?.properties[pProps[0]]?.type || 'string', value: '', connector: 'AND' })"
+                                                    class="mt-2 text-xs font-semibold text-purple-400 border border-purple-800/50 bg-purple-900/20 hover:bg-purple-900/40 px-3 py-2 rounded-lg flex items-center transition shadow-sm">
+                                                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor"
+                                                        viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                                            stroke-width="2" d="M12 4v16m8-8H4"></path>
+                                                    </svg>
+                                                    Add Condition
+                                                </button>
                                             </div>
                                         </div>
                                     </div>
-                                </div>
                             </template>
                         </div>
                     </div>
@@ -814,6 +906,75 @@
                     if (status === 'pending_hitl') return 'bg-yellow-900/60 text-yellow-400 border border-yellow-800';
                     return 'bg-gray-800 text-gray-300 border border-gray-700';
                 },
+                transpileCEL(rows, options = {}) {
+                    const { pretty = true } = options;
+
+                    if (!Array.isArray(rows) || rows.length === 0) return "";
+
+                    const expressions = rows.map((r) => {
+                        if (!r || !r.field || !r.type) return "";
+
+                        const field = `args.${r.field}`;
+                        const val = r.value;
+                        let cel = "";
+
+                        if (r.type === 'string') {
+                            const safeVal = String(val ?? "").replace(/'/g, "\\'");
+
+                            if (r.operator === 'EQUALS')
+                                cel = `${field} == '${safeVal}'`;
+                            else if (r.operator === 'CONTAINS')
+                                cel = `${field}.contains('${safeVal}')`;
+                            else if (r.operator === 'STARTS_WITH')
+                                cel = `${field}.startsWith('${safeVal}')`;
+                            else if (r.operator === 'ENDS_WITH')
+                                cel = `${field}.endsWith('${safeVal}')`;
+                            else if (r.operator === 'MATCHES')
+                                cel = `${field}.matches('${safeVal}')`;
+                            else
+                                cel = `${field} == '${safeVal}'`;
+                        }
+
+                        else if (r.type === 'number' || r.type === 'integer') {
+                            const numVal = Number(val);
+                            if (isNaN(numVal)) return "";
+
+                            if (r.operator === 'EQUALS')
+                                cel = `${field} == ${numVal}`;
+                            else if (r.operator === 'NOT_EQUALS')
+                                cel = `${field} != ${numVal}`;
+                            else if (r.operator === 'GREATER_THAN')
+                                cel = `${field} > ${numVal}`;
+                            else if (r.operator === 'LESS_THAN')
+                                cel = `${field} < ${numVal}`;
+                            else if (r.operator === 'GREATER_EQUAL')
+                                cel = `${field} >= ${numVal}`;
+                            else if (r.operator === 'LESS_EQUAL')
+                                cel = `${field} <= ${numVal}`;
+                            else
+                                cel = `${field} == ${numVal}`;
+                        }
+
+                        else if (r.type === 'boolean') {
+                            const bVal = (r.operator === 'IS_TRUE') ? true : false;
+                            cel = `${field} == ${bVal}`;
+                        }
+
+                        return cel;
+                    }).filter(Boolean);
+
+                    let result = "";
+
+                    expressions.forEach((exp, idx) => {
+                        result += exp;
+                        if (idx < expressions.length - 1) {
+                            const connector = rows[idx + 1]?.connector === 'OR' ? '||' : '&&';
+                            result += pretty ? `\n${connector} ` : ` ${connector} `;
+                        }
+                    });
+
+                    return result.trim();
+                },
 
                 async discover() {
                     if (!this.discoveryJson) return;
@@ -856,10 +1017,10 @@
                             for (let t of tools) {
                                 this.onboardForms[serverName].tools[t.name] = {
                                     allowed: true,
-                                    hitl: false,
+                                    policyAction: 'block',
                                     hitlChannel: 'terminal',
                                     hitlWebhook: '',
-                                    regexMap: {}
+                                    policyRows: []
                                 };
                             }
                         }
@@ -879,7 +1040,7 @@
                             let allowedToolsArr = [];
                             let blockedToolsArr = [];
                             let hitlToolsArr = [];
-                            let parameterRulesMap = {};
+                            let toolPoliciesMap = {};
 
                             let toolsDiscovered = this.discoveredToolsByServer[serverName] || [];
 
@@ -887,21 +1048,29 @@
                                 let state = this.onboardForms[serverName].tools[t.name];
                                 if (state.allowed) {
                                     allowedToolsArr.push(t.name);
-                                    if (state.hitl) hitlToolsArr.push(t.name);
-                                    if (Object.keys(state.regexMap || {}).length > 0) {
-                                        let rules = [];
-                                        for (let [propKey, regexVal] of Object.entries(state.regexMap)) {
-                                            if (regexVal && regexVal.trim() !== '') {
-                                                rules.push({
-                                                    argument: propKey,
-                                                    not_match_regex: regexVal,
-                                                    error_msg: "Security Block: Sandbox Violation on " + propKey
-                                                });
-                                            }
+
+                                    if (state.policyAction === 'hitl' && (!state.policyRows || state.policyRows.length === 0)) {
+                                        hitlToolsArr.push(t.name);
+                                    }
+
+                                    if (state.policyRows && state.policyRows.length > 0) {
+                                        let conditionStr = this.transpileCEL(state.policyRows);
+                                        let msg = "Security Block: Tool violated AgentGate policy.";
+                                        if (state.policyAction === 'hitl') {
+                                            msg = "Tool interrupted for HITL approval via AgentGate policy.";
+                                            hitlToolsArr.push(t.name);
                                         }
-                                        if (rules.length > 0) {
-                                            parameterRulesMap[t.name] = rules;
+
+                                        // Wrap transpiled CEL in grouped parens
+                                        if (state.policyRows.length > 1) {
+                                            conditionStr = `(${conditionStr})`;
                                         }
+
+                                        toolPoliciesMap[t.name] = [{
+                                            action: state.policyAction,
+                                            condition: conditionStr,
+                                            error_msg: msg
+                                        }];
                                     }
                                 } else {
                                     blockedToolsArr.push(t.name);
@@ -921,15 +1090,15 @@
                                 }
                             };
 
-                            if (Object.keys(parameterRulesMap).length > 0) {
-                                finalPayload.mcpServers[serverName].policies.parameter_rules = parameterRulesMap;
+                            if (Object.keys(toolPoliciesMap).length > 0) {
+                                finalPayload.mcpServers[serverName].policies.tool_policies = toolPoliciesMap;
                             }
 
                             if (hitlToolsArr.length > 0) {
                                 const hitlState = this.onboardForms[serverName].tools[hitlToolsArr[0]];
                                 finalPayload.mcpServers[serverName].policies.human_approval = {
-                                    require_for_tools: hitlToolsArr,
-                                    timeout_seconds: 300,
+                                    tools: hitlToolsArr,
+                                    timeout: 300,
                                     webhook: {
                                         type: hitlState.hitlChannel || 'terminal',
                                         url: hitlState.hitlWebhook || ''
@@ -952,7 +1121,7 @@
                         await this.fetchConfig(); // Reload config
 
                         // Build the client-ready mcpServers JSON snippet
-                        const proxyPort = this.configData?.Network?.Port || this.configData?.network?.port || 56123;
+                        const proxyPort = this.configData?.Network?.ProxyPort || this.configData?.network?.proxy_port || 56123;
 
                         // Auth: include header only for a real (non-placeholder) static bearer token
                         const isOAuth = !!(this.configData?.OAuth2?.Enabled);

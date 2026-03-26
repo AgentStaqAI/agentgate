@@ -68,7 +68,7 @@ func BroadcastOutputPatch(serverName, jsonrpcID, outputPayload string) {
 func Subscribe() (chan []byte, func()) {
 	// Buffer allows handling spikes without instantly dropping events
 	ch := make(chan []byte, 100)
-	
+
 	sseClientsMu.Lock()
 	sseClients[ch] = true
 	sseClientsMu.Unlock()

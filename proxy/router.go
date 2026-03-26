@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,7 +11,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-	"encoding/json"
 
 	"github.com/agentgate/agentgate/analytics"
 	"github.com/agentgate/agentgate/auth"
@@ -29,18 +29,31 @@ func (m *sseModifier) Write(b []byte) (int, error) {
 	var env struct {
 		ID json.RawMessage `json:"id"`
 	}
-	line := b
-	if bytes.HasPrefix(b, []byte("data: ")) {
-		line = bytes.TrimPrefix(b, []byte("data: "))
-	}
-	if err := json.Unmarshal(line, &env); err == nil && len(env.ID) > 0 {
-		analytics.RecordOutput(m.serverName, string(env.ID), string(line))
+	// Extract the trailing payload following `data: `
+	dataPrefix := []byte("data: ")
+	if idx := bytes.Index(b, dataPrefix); idx != -1 {
+		lineStart := idx + len(dataPrefix)
+		lineEnd := bytes.IndexByte(b[lineStart:], '\n')
+		var jsonLine []byte
+		if lineEnd == -1 {
+			jsonLine = b[lineStart:]
+		} else {
+			jsonLine = b[lineStart : lineStart+lineEnd]
+		}
+		if err := json.Unmarshal(jsonLine, &env); err == nil && len(env.ID) > 0 {
+			analytics.RecordOutput(m.serverName, string(env.ID), string(jsonLine))
+		}
+	} else {
+		// Fallback for non-SSE JSON bodies
+		if err := json.Unmarshal(b, &env); err == nil && len(env.ID) > 0 {
+			analytics.RecordOutput(m.serverName, string(env.ID), string(b))
+		}
 	}
 
-	// Fast path: check if this looks like our SSE endpoint notification
-	// "data: /message?sessionId="
-	if bytes.Contains(b, []byte("data: /message?sessionId=")) {
-		newB := bytes.Replace(b, []byte("data: /message"), []byte(fmt.Sprintf("data: /%s/message", m.serverName)), 1)
+	// Fast path: dynamic SSE endpoint notification intercept
+	// Handles both standard `data: /message?sessionId=` and absolute nested `data: /mcp/message?sessionId=`
+	if bytes.Contains(b, []byte("data: /")) && bytes.Contains(b, []byte("?sessionId=")) {
+		newB := bytes.Replace(b, []byte("data: /"), []byte(fmt.Sprintf("data: /%s/", m.serverName)), 1)
 		return m.ResponseWriter.Write(newB)
 	}
 	return m.ResponseWriter.Write(b)
@@ -63,18 +76,25 @@ func SetupRouter(ctx context.Context, cfg *config.Config, jwksCache *auth.JWKSCa
 	mux.HandleFunc("/_agentgate/hitl/slack-interactive", hitl.SlackInteractiveHandler())
 	log.Println("[Router] Registered HITL callback routes")
 
-	// ── OAuth 2.1 Discovery ───────────────────────────────────────────────────
-	// Proactive IdP discovery for MCP clients. We redirect them directly to the IdP.
-	if cfg.OAuth2.Enabled && cfg.OAuth2.ResourceMetadata != "" {
-		discoveryHandler := func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, cfg.OAuth2.ResourceMetadata, http.StatusFound)
+	// ── MCP Authorization Discovery (PRM) ─────────────────────────────────────
+	if cfg.OAuth2.Enabled {
+		prmHandler := func(w http.ResponseWriter, r *http.Request) {
+			prm := map[string]interface{}{
+				"resource":              cfg.OAuth2.Resource,
+				"authorization_servers": []string{cfg.OAuth2.Issuer},
+				"scopes_supported":      cfg.OAuth2.ScopesSupported,
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(prm)
 		}
-		mux.HandleFunc("/.well-known/oauth-authorization-server", discoveryHandler)
-		// Register for each server path in case clients assume the tool path is the base URL
+
+		mux.HandleFunc("/.well-known/oauth-protected-resource", prmHandler)
+		// Register for each server path as well
 		for name := range cfg.MCPServers {
-			mux.HandleFunc(fmt.Sprintf("/%s/.well-known/oauth-authorization-server", name), discoveryHandler)
+			mux.HandleFunc(fmt.Sprintf("/%s/.well-known/oauth-protected-resource", name), prmHandler)
 		}
-		log.Println("[Router] Registered OAuth 2.1 discovery endpoints")
+		log.Println("[Router] Registered MCP Authorization PRM endpoints")
 	}
 
 	// ── MCP server routes ─────────────────────────────────────────────────────
@@ -101,6 +121,21 @@ func SetupRouter(ctx context.Context, cfg *config.Config, jwksCache *auth.JWKSCa
 				continue
 			}
 			proxy := httputil.NewSingleHostReverseProxy(targetURL)
+
+			// Override Director to handle duplicated proxy target paths.
+			// The UI generates strict snippet queries (/math/mcp) targeting absolute Upstreams (/mcp).
+			// StripPrefix cleans it to /mcp which httputil blindly joins into /mcp/mcp.
+			originalDirector := proxy.Director
+			proxy.Director = func(req *http.Request) {
+				originalDirector(req)
+				if targetURL.Path != "" && targetURL.Path != "/" {
+					duplicatedPath := targetURL.Path + targetURL.Path
+					if strings.HasPrefix(req.URL.Path, duplicatedPath) {
+						req.URL.Path = strings.Replace(req.URL.Path, duplicatedPath, targetURL.Path, 1)
+					}
+				}
+			}
+
 			proxy.FlushInterval = time.Millisecond * 10
 
 			// Wrap the proxy to inject our SSE namespace rewriter
@@ -124,8 +159,7 @@ func SetupRouter(ctx context.Context, cfg *config.Config, jwksCache *auth.JWKSCa
 		path := "/" + name
 		mux.Handle(path, http.StripPrefix(path, handler))
 		mux.Handle(path+"/", http.StripPrefix(path, handler))
-		hitlEnabled := srvConfig.Policies.HumanApproval != nil && len(srvConfig.Policies.HumanApproval.RequireForTools) > 0
-		log.Printf("[Router] Registered %q → %s (HITL: %v)", name, srvConfig.Upstream, hitlEnabled)
+		log.Printf("[Router] Registered %q → %s", name, srvConfig.Upstream)
 	}
 
 	return mux, cleanups

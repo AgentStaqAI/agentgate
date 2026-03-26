@@ -165,7 +165,7 @@ func NewStdioBridge(ctx context.Context, serverName string, cmdString string, en
 			if err := json.Unmarshal(lineCopy, &env); err == nil && len(env.ID) > 0 {
 				idStr := string(env.ID)
 				analytics.RecordOutput(bridge.serverName, idStr, string(lineCopy))
-				
+
 				bridge.syncRequestsMu.Lock()
 				if ch, ok := bridge.syncRequests[idStr]; ok {
 					ch <- lineCopy
@@ -177,20 +177,14 @@ func NewStdioBridge(ctx context.Context, serverName string, cmdString string, en
 		if scanErr := scanner.Err(); scanErr != nil {
 			log.Printf("[StdioBridge] stdout scanner error for %s: %v", cmdString, scanErr)
 		}
-		log.Printf("[StdioBridge] stdout scanner goroutine ending for: %s", cmdString)
 	}()
 
 	// Stream stderr line-by-line
 	go func() {
-		log.Printf("[StdioBridge] stderr reader goroutine started for: %s", cmdString)
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			log.Printf("[StdioBridge stderr | %s] %s", cmdString, scanner.Text())
 		}
-		if scanErr := scanner.Err(); scanErr != nil {
-			log.Printf("[StdioBridge] stderr scanner error for %s: %v", cmdString, scanErr)
-		}
-		log.Printf("[StdioBridge] stderr reader goroutine ending for: %s", cmdString)
 	}()
 
 	// Wait goroutine: marks bridge as exited and logs exit status.
@@ -198,9 +192,7 @@ func NewStdioBridge(ctx context.Context, serverName string, cmdString string, en
 		waitErr := cmd.Wait()
 		bridge.exited.Store(true)
 		if waitErr != nil {
-			log.Printf("[StdioBridge] Process '%s' (PID %d) exited with ERROR: %v", cmdString, cmd.Process.Pid, waitErr)
-		} else {
-			log.Printf("[StdioBridge] Process '%s' (PID %d) exited gracefully", cmdString, cmd.Process.Pid)
+			log.Printf("[StdioBridge] Process %q exited with error: %v", cmdString, waitErr)
 		}
 	}()
 

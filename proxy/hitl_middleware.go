@@ -25,17 +25,22 @@ import (
 func HITLMiddleware(cfg *config.Config, serverName string, serverConfig config.MCPServer, next http.Handler) http.Handler {
 	ha := serverConfig.Policies.HumanApproval
 
-	// Fast-path: if no tools require approval, bypass entirely.
-	if ha == nil || len(ha.RequireForTools) == 0 {
+	// Fast-path: if no approval config exists at all, bypass entirely.
+	if ha == nil {
 		return next
 	}
 
-	requireSet := make(map[string]struct{}, len(ha.RequireForTools))
-	for _, t := range ha.RequireForTools {
+	// If no webhook is configured, bypass.
+	if ha.Webhook == nil {
+		return next
+	}
+
+	requireSet := make(map[string]struct{}, len(ha.Tools))
+	for _, t := range ha.Tools {
 		requireSet[t] = struct{}{}
 	}
 
-	timeoutSecs := ha.TimeoutSeconds
+	timeoutSecs := ha.Timeout
 	if timeoutSecs <= 0 {
 		timeoutSecs = 60
 	}
@@ -71,8 +76,15 @@ func HITLMiddleware(cfg *config.Config, serverName string, serverConfig config.M
 		}
 		toolName := callReq.Params.Name
 
-		// ── Check approval requirement ────────────────────────────────────────
-		if _, needsApproval := requireSet[toolName]; !needsApproval {
+		// ── Check approval requirement (static list OR CEL-injected force_hitl) ──
+		_, needsApproval := requireSet[toolName]
+		if !needsApproval {
+			if forceHITL, ok := r.Context().Value("force_hitl").(bool); ok && forceHITL {
+				needsApproval = true
+			}
+		}
+
+		if !needsApproval {
 			r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 			next.ServeHTTP(w, r)
 			return

@@ -8,9 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"time"
 
@@ -20,6 +18,7 @@ import (
 	"github.com/agentgate/agentgate/ipc"
 	"github.com/agentgate/agentgate/proxy"
 	"github.com/kardianos/service"
+	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )
 
@@ -28,17 +27,23 @@ import (
 const defaultConfigContent = `version: "1.0"
 
 network:
-  port: 56123         # Main proxy — point your LLM client here
+  proxy_port: 56123   # Main proxy — point your LLM client here
   admin_port: 57123   # Dashboard — open http://localhost:57123
 
 auth:
-  require_bearer_token: "%s"  # Replace this token with a strong secret before exposing externally
+  require_bearer_token: "%s"
 
 audit_log_path: "agentgate_audit.log"
 
-# No MCP servers configured yet.
-# Open http://localhost:57123 to use the Onboarding UI, or edit this file directly.
-
+# oauth2:
+#   enabled: false
+#   issuer: "https://auth.example.com"
+#   audience: "agentgate-api"
+#   jwks_url: "https://auth.example.com/.well-known/jwks.json"
+#   resource: "https://agentgate.local/mcp"
+#   scopes_supported:
+#     - "mcp:tools"
+#     - "mcp:resources"
 `
 
 // generateSecureToken creates a 16-byte (32 hex chars) cryptographically secure token
@@ -113,8 +118,7 @@ func bootstrapConfig(explicit string, flagChanged bool) string {
 			log.Printf("[Bootstrap] Could not write default config to %s: %v", path, err)
 			continue
 		}
-		log.Printf("[Bootstrap] No config found. Created default config at: %s", path)
-		log.Printf("[Bootstrap] Open http://localhost:57123 to configure AgentGate via the Onboarding UI.")
+		log.Printf("[Bootstrap] Created default config at %s", path)
 		return path
 	}
 
@@ -162,7 +166,7 @@ func (p *program) run() {
 		if err != nil {
 			log.Fatalf("[OAuth2] Failed to initialize JWKS cache: %v", err)
 		}
-		log.Printf("[OAuth2] Resource Server mode enabled (issuer=%s, audience=%s)", p.cfg.OAuth2.Issuer, p.cfg.OAuth2.Audience)
+		log.Printf("[OAuth2] Resource Server mode enabled (issuer=%s)", p.cfg.OAuth2.Issuer)
 	}
 
 	// ── Hot-Reload architecture ──────────────────────────────────────────────
@@ -204,28 +208,35 @@ func (p *program) run() {
 		go analytics.StartAdminServer(p.ctx, getConfig, configPath, reloadFunc)
 	}
 
-	addr := fmt.Sprintf(":%d", p.cfg.Network.Port)
+	addr := fmt.Sprintf(":%d", p.cfg.Network.ProxyPort)
 
 	ipc.StartServer()
 
 	// If no MCP servers are configured, auto-open the Onboarding UI in the browser
 	if len(p.cfg.MCPServers) == 0 {
-		log.Println("[Init] No MCP servers configured. Opening Onboarding UI in browser...")
+		adminPort := p.cfg.Network.AdminPort
+		if adminPort == 0 {
+			adminPort = 57123
+		}
+		dashboardURL := fmt.Sprintf("http://127.0.0.1:%d", adminPort)
+
+		fmt.Println("")
+		fmt.Println("==================================================")
+		fmt.Println("🚀 AgentGate: First Run Detected")
+		fmt.Println("==================================================")
+		fmt.Println("No agentgate.yaml found. Starting in Onboarding Mode.")
+		fmt.Println("")
+		fmt.Println("To configure your MCP firewalls, open the dashboard:")
+		fmt.Printf("👉 %s\n", dashboardURL)
+		fmt.Println("")
+		fmt.Println("If running on a remote server, use an SSH tunnel:")
+		fmt.Printf("   ssh -L %d:localhost:%d user@your-server-ip\n", adminPort, adminPort)
+		fmt.Println("==================================================")
+		fmt.Println("")
+
 		go func() {
 			time.Sleep(1 * time.Second)
-			dashboardURL := fmt.Sprintf("http://127.0.0.1:%d", p.cfg.Network.AdminPort)
-			var openCmd *exec.Cmd
-			switch runtime.GOOS {
-			case "linux":
-				openCmd = exec.Command("xdg-open", dashboardURL)
-			case "windows":
-				openCmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", dashboardURL)
-			case "darwin":
-				openCmd = exec.Command("open", dashboardURL)
-			}
-			if openCmd != nil {
-				openCmd.Start()
-			}
+			_ = browser.OpenURL(dashboardURL)
 		}()
 	}
 
