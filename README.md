@@ -14,25 +14,6 @@
 
 ---
 
-## The Problem: AI agents are a security nightmare
-
-The developer experience of the Model Context Protocol (MCP) is incredible, but the security model is terrifying. Giving an autonomous LLM raw `stdio` access to your local filesystem, PostgreSQL database, or GitHub API via a simple `npx` script is a disaster waiting to happen.
-
-Relying on system prompts ("please don't delete my production database") is not security. I wanted a hard, network-level boundary. So I built AgentGate.
-
-```text
-[ AI Client ] ──► (HTTP/SSE) ──► [ AgentGate :56123 ] ──► (stdio / HTTP) ──► [ MCP Tool ]
-                                           │
-                                  ┌────────┴────────────────┐
-                                  │  OAuth 2.1 (DCR) Auth   │
-                                  │  CEL Visual Firewall    │
-                                  │  Protocol Bridging      │
-                                  │  SQLite Audit Firehose  │
-                                  └─────────────────────────┘
-```
-
-
----
 
 ## Why AgentGate? (Because Prompt Guardrails Are Not Security)
 
@@ -221,6 +202,7 @@ AgentGate:
 - Converts UI → CEL expressions  
 - Executes in microseconds  
 - Use jwt grants/roles in CEL with arguments.
+![Screenshot 2026-03-25 at 6 51 58 pm](https://github.com/user-attachments/assets/69b34d95-f3ec-4c7d-b151-b2fb3891047f)
 
 ---
 
@@ -251,8 +233,11 @@ It will:
 - Instantly ping your Slack, Discord, Terminal, or a custom Webhook  
 
 The LLM simply waits until an admin clicks **"Approve"** or **"Deny"**.
+![Screenshot 2026-03-26 at 4 30 48 pm](https://github.com/user-attachments/assets/ad792604-21db-42fe-89cf-de5520a2fce2)
 
 ---
+
+
 
 ## Quick Start
 
